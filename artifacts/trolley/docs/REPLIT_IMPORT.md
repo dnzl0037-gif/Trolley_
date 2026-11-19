@@ -100,7 +100,8 @@ for the original setup instructions and known product boundaries.
 
 For an owner-confirmed fresh installation, the development server provides
 `<artifact-base-path>__setup/trolley-database.sql` as a downloadable setup file.
-It combines both unchanged migrations and the unchanged category seed contents
+It combines the original migrations, subsequent privacy hardening migration,
+and the unchanged category seed contents
 inside one transaction (replacing only the seed's separate transaction wrapper).
 Open the downloaded file, copy its full contents into the confirmed project's
 Supabase SQL Editor, and run once. This endpoint only prepares a download:
@@ -132,6 +133,13 @@ history. Resolve any partial or mismatched installation before running scripts.
 Only after that check, apply missing migrations in order and the category seed
 to the confirmed target. Preserve both original migration files and seed data.
 The seed contains 51 parent categories and 1,020 children.
+
+For the subsequent authorized, dedicated-project privacy audit, demonstrated
+message membership and verification-submission flaws were fixed in
+`202611190003_message_and_verification_privacy.sql`. The role-based SQL suite
+passed 69 checks after that migration. See [PRIVACY_CHECKS.md](PRIVACY_CHECKS.md)
+for scope, safety requirements, reproduction and results. This is not production
+certification or a full security audit.
 
 In Supabase Authentication → URL Configuration, add the exact preview origin
 plus the artifact base path to the redirect allowlist, retaining existing URLs.

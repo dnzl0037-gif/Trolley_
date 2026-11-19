@@ -20,12 +20,13 @@ export function databaseSetupDownload(): Plugin {
           return;
         }
         try {
-          const [initial, hardening, seed] = await Promise.all([
+          const [initial, hardening, privacy, seed] = await Promise.all([
             readFile(new URL('../supabase/migrations/202611190001_initial_schema.sql', import.meta.url), 'utf8'),
             readFile(new URL('../supabase/migrations/202611190002_security_hardening.sql', import.meta.url), 'utf8'),
+            readFile(new URL('../supabase/migrations/202611190003_message_and_verification_privacy.sql', import.meta.url), 'utf8'),
             readFile(new URL('../supabase/seed/001_categories.sql', import.meta.url), 'utf8'),
           ]);
-          // Use one outer transaction for all three original scripts. Fail
+          // Use one outer transaction for all migrations and the seed. Fail
           // explicitly if the seed's transaction layout changes.
           if ((seed.match(/^begin;\r?$/gm) ?? []).length !== 1 ||
               (seed.match(/^commit;\r?$/gm) ?? []).length !== 1) {
@@ -40,6 +41,7 @@ export function databaseSetupDownload(): Plugin {
             'begin;',
             initial,
             hardening,
+            privacy,
             seedBody,
             'commit;',
           ].join('\n\n');

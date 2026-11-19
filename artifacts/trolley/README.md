@@ -41,11 +41,12 @@ Open the local URL printed by Vite. Without Supabase credentials the discovery i
 1. Create a Supabase project.
 2. In the SQL Editor, run `supabase/migrations/202611190001_initial_schema.sql`.
 3. Run `supabase/migrations/202611190002_security_hardening.sql`.
-4. Run `supabase/seed/001_categories.sql`.
-5. Confirm the seed reports at least 1,000 child categories (the supplied seed contains 1,020).
-6. In Authentication → URL Configuration, set the local and production Site URL / redirect allowlist.
-7. Enable Google as an Auth provider and configure its OAuth client ID and secret in Supabase. Never put the Google client secret in this repository or in a `VITE_` variable.
-8. Add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` to `.env` locally and to the hosting provider's environment settings for production.
+4. Run `supabase/migrations/202611190003_message_and_verification_privacy.sql`.
+5. Run `supabase/seed/001_categories.sql`.
+6. Confirm the seed reports at least 1,000 child categories (the supplied seed contains 1,020).
+7. In Authentication → URL Configuration, set the local and production Site URL / redirect allowlist.
+8. Enable Google as an Auth provider and configure its OAuth client ID and secret in Supabase. Never put the Google client secret in this repository or in a `VITE_` variable.
+9. Add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` to `.env` locally and to the hosting provider's environment settings for production.
 
 The Supabase publishable/anon key is intended for browser use; database RLS is the security boundary. Never use a service-role key in frontend code.
 
@@ -81,7 +82,11 @@ Build and test on a physical Android device before describing the app as release
 - Payment events are not writable by browser clients.
 - Non-essential tracking is not loaded; the consent banner keeps optional analytics off unless accepted.
 
-The migrations still require a real Supabase deployment and role-by-role RLS testing before production. The SQL files are a starting implementation, not proof of a completed security audit.
+See [PRIVACY_CHECKS.md](docs/PRIVACY_CHECKS.md) for reproducible role-by-role checks
+and the authorized test-project results. Testing a dedicated project does not
+certify production or replace a full security audit. For an existing installation,
+inspect its objects and migration history, then apply only missing migrations;
+do not rerun the initial schema.
 
 ## Known implementation boundaries
 

@@ -1,0 +1,1 @@
+- [Imported app compatibility](import-compatibility.md) — preserve React 18 isolation and consistent modern targets when adapting the imported Vite app.

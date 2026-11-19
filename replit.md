@@ -43,3 +43,18 @@ _Populate as you build — sharp edges, "always run X before Y" rules._
 ## Pointers
 
 - See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
+
+## Trolley imported application
+
+- Trolley lives in `artifacts/trolley/`; run it with the managed
+  `artifacts/trolley: web` workflow.
+- This is the user's existing services marketplace, not a retail store.
+  Preserve the imported React/TypeScript/Vite architecture; the user chose
+  Vite rather than an Expo conversion.
+- Preserve the external Supabase architecture, migrations, category seed,
+  and security policies. Do not substitute a new database or auth provider.
+- See `artifacts/trolley/docs/REPLIT_IMPORT.md` for import adjustments,
+  verification results, and remaining Supabase setup.
+- Checks: `pnpm --filter @workspace/trolley run typecheck`,
+  `pnpm --filter @workspace/trolley run lint`, and
+  `pnpm --filter @workspace/trolley run build`.

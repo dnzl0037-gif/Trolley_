@@ -1,0 +1,35 @@
+{
+  "name": "@workspace/trolley",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "typecheck": "tsc -p tsconfig.app.json --noEmit",
+    "lint": "eslint .",
+    "android:add": "pnpm exec cap add android",
+    "android:sync": "pnpm run build && pnpm exec cap sync android",
+    "android:open": "pnpm exec cap open android"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^6.0.5",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "lucide-react": "^0.468.0",
+    "zod": "^3.24.1",
+    "@capacitor/core": "^8.6.2"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "typescript": "~5.6.2",
+    "eslint": "^9.17.0",
+    "@eslint/js": "^9.17.0",
+    "typescript-eslint": "^8.19.1",
+    "@capacitor/cli": "^8.6.2"
+  }
+}

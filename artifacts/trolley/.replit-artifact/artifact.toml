@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Trolley"
+description = "The imported Trolley services marketplace, preserving its original React, TypeScript, Vite, Capacitor and Supabase source and data."
+version = "1.0.0"
+id = "artifacts/trolley"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 21294
+
+[services.development]
+run = "pnpm --filter @workspace/trolley run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/trolley", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/trolley/dist"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "21294"
+BASE_PATH = "/"

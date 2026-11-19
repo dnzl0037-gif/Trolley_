@@ -6,6 +6,9 @@ import { useAccount } from './lib/useAccount';
 import { useProviderProfile } from './lib/useProviderProfile';
 import { PasswordRecovery } from './components/PasswordRecovery';
 import { ProviderEditor } from './components/ProviderEditor';
+import { SearchSelect } from './components/SearchSelect';
+import { RegionCountryFields } from './components/LocationFields';
+import { countries, getCountryLabel, getRegionForCountry, regions } from './lib/geography';
 
 type Modal = 'signin' | 'signup' | 'forgot' | 'provider' | 'privacy' | 'terms' | null;
 const familyIcons = [Wrench, Zap, Sparkles, Car, BriefcaseBusiness, GraduationCap, Scissors, Camera];
@@ -21,7 +24,7 @@ const familyHighlights = [
 function App() {
   const [dark, setDark] = useState(() => localStorage.getItem('trolley-theme') === 'dark');
   const [query, setQuery] = useState('');
-  const [location, setLocation] = useState('Harare, Zimbabwe');
+  const [location, setLocation] = useState(() => localStorage.getItem('trolley-discovery-country') ?? 'ZW');
   const [activeCategory, setActiveCategory] = useState('All services');
   const [modal, setModal] = useState<Modal>(null);
   const [mobileMenu, setMobileMenu] = useState(false);
@@ -55,7 +58,12 @@ function App() {
   }, [account.user?.id]);
 
   useEffect(() => { setNotice(''); }, [modal]);
-  const providerOptions = categories.filter(c => c.parentId).map(c => { const parent = categories.find(p => p.id === c.parentId); const slug = `${parent?.name ?? ''}-${c.name}`.toLowerCase().replace(/&/g,'and').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,''); return { ...c, slug, family: parent?.name ?? '' }; });
+  useEffect(() => { localStorage.setItem('trolley-discovery-country', location); }, [location]);
+  const discoveryCountries = useMemo(() => [{ value: '', label: 'Anywhere' }, ...countries.map(c => ({ value: c.value, label: c.label, hint: c.value, keywords: regions.find(r => r.value === c.region)?.label })).sort((a, b) => a.label.localeCompare(b.label))], []);
+  const providerOptions = useMemo(() => categories.filter(c => c.parentId).map(c => { const parent = categories.find(p => p.id === c.parentId); const slug = `${parent?.name ?? ''}-${c.name}`.toLowerCase().replace(/&/g,'and').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,''); return { ...c, slug, family: parent?.name ?? '' }; }), []);
+  const categoryPickerOptions = useMemo(() => providerOptions.map(c => ({ value: c.slug, label: c.name, hint: c.family })), [providerOptions]);
+  const directoryPickerOptions = useMemo(() => providerOptions.map(c => ({ value: c.name, label: c.name, hint: c.family, keywords: c.slug })), [providerOptions]);
+  function changeProviderCountry(code: string) { if (code !== providerCountry) setProviderCity(''); setProviderCountry(code); }
 
   useEffect(() => { document.documentElement.dataset.theme = dark ? 'dark' : 'light'; localStorage.setItem('trolley-theme', dark ? 'dark' : 'light'); }, [dark]);
   const filteredCategories = useMemo(() => {
@@ -143,8 +151,9 @@ function App() {
       {account.error && <p className="notice-message section-wrap" role="alert">{account.error}</p>}
       <section className="hero section-wrap">
         <div className="hero-copy"><div className="eyebrow"><span className="eyebrow-line"/> YOUR LOCAL SERVICES, SORTED</div><h1>Find the right<br/><span>people for the job.</span></h1><p className="hero-lead">From the quick fix to the big project. Discover local professionals, compare your options and get the help you need.</p>
-          <div className="search-panel"><div className="search-field"><Search size={20}/><input aria-label="Search services" value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => e.key === 'Enter' && document.getElementById('explore')?.scrollIntoView({behavior:'smooth'})} placeholder="What service do you need?"/><kbd>⌘ K</kbd></div><div className="search-divider"/><div className="location-field"><MapPin size={19}/><input aria-label="Location" value={location} onChange={e => setLocation(e.target.value)} /></div><button className="btn btn-orange search-submit" onClick={() => document.getElementById('explore')?.scrollIntoView({behavior:'smooth'})}>Find a pro <ArrowRight size={17}/></button></div>
+          <div className="search-panel"><div className="search-field"><Search size={20}/><input aria-label="Search services" value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => e.key === 'Enter' && document.getElementById('explore')?.scrollIntoView({behavior:'smooth'})} placeholder="What service do you need?"/><kbd>⌘ K</kbd></div><div className="search-divider"/><div className="location-field"><SearchSelect compact label="Location" icon={<MapPin size={17}/>} value={location} onChange={setLocation} options={discoveryCountries} placeholder="Anywhere" searchPlaceholder="Search country or ISO code" testId="discovery-country"/></div><button className="btn btn-orange search-submit" onClick={() => document.getElementById('explore')?.scrollIntoView({behavior:'smooth'})}>Find a pro <ArrowRight size={17}/></button></div>
           <div className="hero-meta"><span><ShieldCheck size={16}/> Real providers. Real profiles.</span><span className="meta-dot"/><span>No pressure. Just options.</span></div>
+          <p className="discovery-note" data-testid="text-discovery-location">{location ? `Exploring from ${getCountryLabel(location)}, ${regions.find(r => r.value === getRegionForCountry(location))?.label ?? ''}.` : 'Exploring from anywhere.'} Saved on this device only. Directory results are service types, not providers in that location.</p>
         </div>
         <div className="hero-art" aria-label="Trolley service discovery illustration"><div className="art-orbit orbit-one"/><div className="art-orbit orbit-two"/><div className="art-center"><div className="art-icon"><img src="/trolley-logo.jpg" alt="Trolley shopping cart logo"/></div><div className="art-caption"><span className="art-caption-dot"/> The right help is closer than you think</div></div><div className="float-card float-card-top"><span className="float-icon green"><Wrench size={17}/></span><span><b>Home repairs</b><small>Find a local specialist</small></span><ArrowUpRight size={16}/></div><div className="float-card float-card-bottom"><span className="float-icon orange"><BriefcaseBusiness size={17}/></span><span><b>Business services</b><small>Experts for every stage</small></span><ArrowUpRight size={16}/></div><div className="art-spark spark-a">✳</div><div className="art-spark spark-b">✦</div></div>
       </section>
@@ -153,7 +162,7 @@ function App() {
 
       <section className="explore-section section-wrap" id="explore"><div className="section-heading"><div><div className="eyebrow"><span className="eyebrow-line"/> DISCOVER WHAT YOU NEED</div><h2>What can we help<br className="mobile-break"/> you <span>find?</span></h2></div><button className="view-all" onClick={() => {setActiveCategory('All services');setQuery('');setShowAll(!showAll)}}>{showAll ? 'Show less' : 'Browse all services'} <ArrowUpRight size={17}/></button></div>
         <div className="category-grid">{familyHighlights.map((item, i) => {const Icon=item.icon;return <button className={`category-card cat-${i}`} key={item.name} onClick={() => chooseCategory(familyNames[i] || 'All services')}><span className="category-icon"><Icon size={22}/></span><span className="category-info"><b>{item.name}</b><small>{item.detail}</small></span><ArrowUpRight className="category-arrow" size={18}/></button>})}</div>
-        <div className="category-browser"><div className="browser-top"><div><span className="browser-kicker">SERVICE DIRECTORY</span><h3>Explore the directory</h3></div><span className="count-pill">{subcategoryCount.toLocaleString()} service types indexed</span></div><div className="filter-row"><button className={`filter-chip ${activeCategory==='All services'?'selected':''}`} onClick={() => chooseCategory('All services')}>All services</button>{familyNames.slice(0,8).map(n=><button key={n} className={`filter-chip ${activeCategory===n?'selected':''}`} onClick={() => chooseCategory(n)}>{n}</button>)}</div>
+        <div className="category-browser"><div className="browser-top"><div><span className="browser-kicker">SERVICE DIRECTORY</span><h3>Explore the directory</h3></div><div className="browser-tools"><SearchSelect compact label="Jump to a service type" value={directoryPickerOptions.some(o => o.value === query) ? query : ''} onChange={v => { setQuery(v); setActiveCategory(v); }} options={directoryPickerOptions} placeholder="Find a service type" searchPlaceholder="Search service or family" maxVisible={60} testId="directory-category"/><span className="count-pill">{subcategoryCount.toLocaleString()} service types indexed</span></div></div><div className="filter-row"><button className={`filter-chip ${activeCategory==='All services'?'selected':''}`} onClick={() => chooseCategory('All services')}>All services</button>{familyNames.slice(0,8).map(n=><button key={n} className={`filter-chip ${activeCategory===n?'selected':''}`} onClick={() => chooseCategory(n)}>{n}</button>)}</div>
           {query.trim() ? <div className="search-results"><div className="results-label">MATCHING SERVICE TYPES <span>{filteredCategories.length} results</span></div>{filteredCategories.length ? <div className="result-chips">{filteredCategories.slice(0,24).map(c=><button key={c.id} onClick={() => {setQuery(c.name);setActiveCategory(c.name)}}>{c.name}<ArrowUpRight size={13}/></button>)}</div> : <div className="empty-results">No matching service types yet. Try a broader search or another phrase.</div>}</div> : <div className="directory-note"><div className="note-icon"><Search size={18}/></div><div><b>Search over 1,000 service specialities</b><p>Type a service above to see matching categories. Provider results will appear here once real providers publish approved listings.</p></div><button className="subtle-link" onClick={() => setShowAll(!showAll)}>{showAll ? 'Hide categories' : 'See categories'} <ChevronDown size={15}/></button></div>}
           {showAll && <div className="all-families">{categoryFamilies.map(([family,...subs])=><div className="family-list" key={family}><b>{family}</b><div>{subs.map(s=><button key={s} onClick={()=>{setQuery(s);setActiveCategory(family)}}>{s}</button>)}</div></div>)}</div>}
         </div>
@@ -191,9 +200,9 @@ function App() {
           <p className="modal-intro">Start with your business details. Trolley saves this as a private draft; an administrator must review and approve it before customers can find it.</p>
           <form className="auth-form" onSubmit={submitProvider}>
             <label>Business name<input required minLength={2} maxLength={120} value={providerBusiness} onChange={e=>setProviderBusiness(e.target.value)} placeholder="e.g. Brightline Electrical"/></label>
-            <label>Main service category<select required value={providerCategory} onChange={e=>setProviderCategory(e.target.value)}>{providerOptions.map(c=><option key={c.id} value={c.slug}>{c.family} · {c.name}</option>)}</select></label>
-            <label>City<input required minLength={2} maxLength={100} value={providerCity} onChange={e=>setProviderCity(e.target.value)} placeholder="Harare"/></label>
-            <label>Country<select value={providerCountry} onChange={e=>setProviderCountry(e.target.value)}><option value="ZW">Zimbabwe</option><option value="ZA">South Africa</option><option value="KE">Kenya</option><option value="BW">Botswana</option><option value="ZM">Zambia</option><option value="GB">United Kingdom</option><option value="US">United States</option></select></label>
+            <SearchSelect label="Main service category" required value={providerCategory} onChange={setProviderCategory} options={categoryPickerOptions} placeholder="Choose a service category" searchPlaceholder="Search service or family" testId="provider-category"/>
+            <RegionCountryFields required country={providerCountry} onCountry={changeProviderCountry} testId="provider"/>
+            <label>City<input required minLength={2} maxLength={100} value={providerCity} onChange={e=>setProviderCity(e.target.value)} placeholder={providerCountry ? `A city in ${getCountryLabel(providerCountry)}` : 'Choose a country first'}/></label>
             <label>Short business description<textarea rows={3} maxLength={1200} value={providerDescription} onChange={e=>setProviderDescription(e.target.value)} placeholder="Tell customers what you do and the areas you serve."/></label>
             <button className="btn btn-dark auth-submit" disabled={busy}>{busy?'Saving draft…':'Save provider draft'} <ArrowRight size={16}/></button>
           </form>

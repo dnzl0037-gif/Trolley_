@@ -1,4 +1,7 @@
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
+import { SearchSelect } from './SearchSelect';
+import { RegionCountryFields } from './LocationFields';
+import { getCountryLabel } from '../lib/geography';
 import { supabase } from '../lib/supabase';
 import type { ProviderProfile } from '../lib/useProviderProfile';
 
@@ -16,6 +19,8 @@ export function ProviderEditor({ profile, options, refresh }: {
   const [category, setCategory] = useState(service?.categories?.slug ?? '');
   const [city, setCity] = useState(location?.city ?? '');
   const [country, setCountry] = useState(location?.country_code ?? '');
+  const categoryOptions = useMemo(() => options.map(o => ({ value: o.slug, label: o.name, hint: o.family })), [options]);
+  function changeCountry(code: string) { if (code !== country) setCity(''); setCountry(code); }
   const [busy, setBusy] = useState(false);
   const saving = useRef(false);
   const [message, setMessage] = useState('');
@@ -63,12 +68,9 @@ export function ProviderEditor({ profile, options, refresh }: {
     }}>
       <fieldset disabled={busy} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }} className="auth-form">
         <label>Business name<input required minLength={2} maxLength={120} value={business} onChange={event => setBusiness(event.target.value)}/></label>
-        <label>Main service category<select required value={category} onChange={event => setCategory(event.target.value)}>
-          {!options.some(option => option.slug === category) && <option value={category} disabled>Choose an active service category</option>}
-          {options.map(option => <option key={option.slug} value={option.slug}>{option.family} · {option.name}</option>)}
-        </select></label>
-        <label>City<input required minLength={2} maxLength={100} value={city} onChange={event => setCity(event.target.value)}/></label>
-        <label>Country code<input required pattern="[A-Z]{2}" maxLength={2} value={country} onChange={event => setCountry(event.target.value.toUpperCase())}/><small className="field-hint">Two-letter code, for example ZW or ZA.</small></label>
+        <SearchSelect label="Main service category" required disabled={busy} value={options.some(option => option.slug === category) ? category : ''} onChange={setCategory} options={categoryOptions} placeholder="Choose an active service category" searchPlaceholder="Search service or family" testId="editor-category"/>
+        <RegionCountryFields required disabled={busy} country={country} onCountry={changeCountry} testId="editor"/>
+        <label>City<input required minLength={2} maxLength={100} value={city} onChange={event => setCity(event.target.value)} placeholder={country ? `A city in ${getCountryLabel(country)}` : 'Choose a country first'}/></label>
         <label>Short business description<textarea rows={3} maxLength={1200} value={description} onChange={event => setDescription(event.target.value)}/></label>
         <button type="submit" value="save" className="btn btn-dark auth-submit">{busy ? 'Saving…' : 'Save changes'}</button>
         <button type="submit" value="review" className="btn btn-outline" disabled={service.status === 'pending_review'}>Submit for review</button>

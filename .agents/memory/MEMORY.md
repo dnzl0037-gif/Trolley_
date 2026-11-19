@@ -1,3 +1,4 @@
 - [Imported app compatibility](import-compatibility.md) — preserve React 18 isolation and consistent modern targets when adapting the imported Vite app.
 - [Authorized privacy testing](privacy-testing.md) — owner authorized the configured dedicated Supabase test project; keep fixtures isolated and confirm the connection target.
 - [Supabase recovery testing](supabase-recovery-testing.md) — legacy user recovery fields alone do not create a valid token in the dedicated Auth project's current version.
+- [Location terminology](location-terminology.md) — the user confirmed Region means continents such as Africa, not provinces or states.

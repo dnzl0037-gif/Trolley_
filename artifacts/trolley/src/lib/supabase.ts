@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { Capacitor } from '@capacitor/core';
 
 const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
@@ -7,8 +8,9 @@ export const supabase = isSupabaseConfigured ? createClient(url!, anonKey!, {
   auth: { autoRefreshToken: true, persistSession: true, detectSessionInUrl: true },
 }) : null;
 
-// Keep confirmation and OAuth callbacks inside this artifact's mounted path.
+// In the Android app, email and Google links return through the app's own link scheme.
 export function authRedirectUrl() {
+  if (Capacitor.isNativePlatform()) return 'com.trolley.marketplace://auth/callback';
   return new URL(import.meta.env.BASE_URL, window.location.origin).href;
 }
 

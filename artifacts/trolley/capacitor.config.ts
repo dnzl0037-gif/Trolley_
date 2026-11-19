@@ -4,6 +4,7 @@ const config: CapacitorConfig = {
   appId: 'com.trolley.marketplace',
   appName: 'Trolley',
   webDir: 'dist',
+  backgroundColor: '#000000',
   server: { androidScheme: 'https' },
 };
 

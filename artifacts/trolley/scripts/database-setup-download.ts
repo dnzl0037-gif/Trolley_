@@ -20,10 +20,11 @@ export function databaseSetupDownload(): Plugin {
           return;
         }
         try {
-          const [initial, hardening, privacy, seed] = await Promise.all([
+          const [initial, hardening, privacy, editor, seed] = await Promise.all([
             readFile(new URL('../supabase/migrations/202611190001_initial_schema.sql', import.meta.url), 'utf8'),
             readFile(new URL('../supabase/migrations/202611190002_security_hardening.sql', import.meta.url), 'utf8'),
             readFile(new URL('../supabase/migrations/202611190003_message_and_verification_privacy.sql', import.meta.url), 'utf8'),
+            readFile(new URL('../supabase/migrations/202611190004_provider_draft_editor.sql', import.meta.url), 'utf8'),
             readFile(new URL('../supabase/seed/001_categories.sql', import.meta.url), 'utf8'),
           ]);
           // Use one outer transaction for all migrations and the seed. Fail
@@ -42,6 +43,7 @@ export function databaseSetupDownload(): Plugin {
             initial,
             hardening,
             privacy,
+            editor,
             seedBody,
             'commit;',
           ].join('\n\n');

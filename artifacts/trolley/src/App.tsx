@@ -5,6 +5,7 @@ import { authRedirectUrl, isSupabaseConfigured, supabase } from './lib/supabase'
 import { useAccount } from './lib/useAccount';
 import { useProviderProfile } from './lib/useProviderProfile';
 import { PasswordRecovery } from './components/PasswordRecovery';
+import { ProviderEditor } from './components/ProviderEditor';
 
 type Modal = 'signin' | 'signup' | 'forgot' | 'provider' | 'privacy' | 'terms' | null;
 const familyIcons = [Wrench, Zap, Sparkles, Car, BriefcaseBusiness, GraduationCap, Scissors, Camera];
@@ -182,11 +183,7 @@ function App() {
       {modal==='provider' && <>
         <div className="modal-logo"><Store size={25}/></div><div className="modal-eyebrow">GROW WITH TROLLEY</div>
         <h2 id="modal-title">{savedProvider.profile ? 'Your saved provider profile.' : 'Create your provider profile.'}</h2>
-        {account.loading || savedProvider.loading ? <p role="status">Loading your saved profile…</p> : savedProvider.error ? <div className="notice-message" role="alert"><p>We could not check your saved provider profile: {savedProvider.error}</p><button className="btn btn-outline" onClick={savedProvider.refresh}>Retry</button></div> : savedProvider.profile ? <div className="auth-form">
-          <h3>{savedProvider.profile.business_name}</h3>
-          {savedProvider.profile.description && <p>{savedProvider.profile.description}</p>}
-          <p className="field-hint">Saved reference: {savedProvider.profile.id}. This profile was loaded from your account, not just this browser. Creating a draft does not publish a listing or grant a verification badge.</p>
-        </div> : !account.user ? <>
+        {account.loading || savedProvider.loading ? <p role="status">Loading your saved profile…</p> : savedProvider.error ? <div className="notice-message" role="alert"><p>We could not check your saved provider profile: {savedProvider.error}</p><button className="btn btn-outline" onClick={savedProvider.refresh}>Retry</button></div> : savedProvider.profile ? <ProviderEditor key={`${account.user?.id}:${savedProvider.profile.id}`} profile={savedProvider.profile} options={providerOptions} refresh={saved => { setNotice(saved ? 'Changes saved. Reloading your stored details and review status.' : ''); savedProvider.refresh(); }}/> : !account.user ? <>
           <p className="modal-intro">Sign in or create an account before saving a private provider draft.</p>
           <button className="btn btn-dark auth-submit" onClick={() => setModal('signin')}>Sign in <ArrowRight size={16}/></button>
           <button className="subtle-link" onClick={() => setModal('signup')}>Create account</button>

@@ -38,6 +38,7 @@ node_modules
 /connect.lock
 /coverage
 /libpeerconnection.log
+/generated-artifacts/
 npm-debug.log
 yarn-error.log
 testem.log

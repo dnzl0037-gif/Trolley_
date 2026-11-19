@@ -1,0 +1,8 @@
+{
+  "name": "Trolley",
+  "description": "Discover trusted local service professionals and manage provider business profiles.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -6,3 +6,8 @@ export const isSupabaseConfigured = Boolean(url && anonKey && !url.includes('YOU
 export const supabase = isSupabaseConfigured ? createClient(url!, anonKey!, {
   auth: { autoRefreshToken: true, persistSession: true, detectSessionInUrl: true },
 }) : null;
+
+// Keep confirmation and OAuth callbacks inside this artifact's mounted path.
+export function authRedirectUrl() {
+  return new URL(import.meta.env.BASE_URL, window.location.origin).href;
+}

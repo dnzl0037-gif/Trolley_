@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowRight, ArrowUpRight, Search, MapPin, SlidersHorizontal, Menu, X, Sun, Moon, Heart, ShieldCheck, Wrench, Zap, Sparkles, Car, GraduationCap, BriefcaseBusiness, Scissors, Camera, ChevronDown, Check, LockKeyhole, UserRound, Store, MessageCircle, BadgeCheck, Clock3, Plus, CircleHelp, ShoppingBasket, Star, Mail, Eye, EyeOff } from 'lucide-react';
 import { categories, categoryFamilies, subcategoryCount } from './lib/categories';
-import { isSupabaseConfigured, supabase } from './lib/supabase';
+import { authRedirectUrl, isSupabaseConfigured, supabase } from './lib/supabase';
+import { useAccount } from './lib/useAccount';
+import { useProviderProfile } from './lib/useProviderProfile';
 
 type Modal = 'signin' | 'signup' | 'provider' | 'privacy' | 'terms' | null;
 const familyIcons = [Wrench, Zap, Sparkles, Car, BriefcaseBusiness, GraduationCap, Scissors, Camera];
@@ -35,6 +37,22 @@ function App() {
   const [providerCity, setProviderCity] = useState('Harare');
   const [providerCountry, setProviderCountry] = useState('ZW');
   const [providerCategory, setProviderCategory] = useState('plumbing-leak-detection');
+  const account = useAccount();
+  const savedProvider = useProviderProfile(account.user?.id, modal === 'provider');
+
+  useEffect(() => {
+    setProviderBusiness('');
+    setProviderDescription('');
+    setProviderCity('Harare');
+    setProviderCountry('ZW');
+    setProviderCategory('plumbing-leak-detection');
+    setPassword('');
+    setEmail('');
+    setFullName('');
+    setAge('');
+  }, [account.user?.id]);
+
+  useEffect(() => { setNotice(''); }, [modal]);
   const providerOptions = categories.filter(c => c.parentId).map(c => { const parent = categories.find(p => p.id === c.parentId); const slug = `${parent?.name ?? ''}-${c.name}`.toLowerCase().replace(/&/g,'and').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,''); return { ...c, slug, family: parent?.name ?? '' }; });
 
   useEffect(() => { document.documentElement.dataset.theme = dark ? 'dark' : 'light'; localStorage.setItem('trolley-theme', dark ? 'dark' : 'light'); }, [dark]);
@@ -56,26 +74,55 @@ function App() {
     }
     if (!supabase) { setNotice('Supabase is not connected yet. Add your project URL and publishable key to the .env file to enable accounts.'); return; }
     setBusy(true);
-    const result = modal === 'signup'
-      ? await supabase.auth.signUp({ email, password, options: { data: { full_name: fullName, date_of_birth: age } } })
-      : await supabase.auth.signInWithPassword({ email, password });
-    setBusy(false);
-    if (result.error) setNotice(result.error.message); else setNotice(modal === 'signup' ? 'Account request received. Check your email to verify your address.' : 'You are signed in.');
+    try {
+      const result = modal === 'signup'
+        ? await supabase.auth.signUp({ email: email.trim(), password, options: { emailRedirectTo: authRedirectUrl(), data: { full_name: fullName.trim(), date_of_birth: age } } })
+        : await supabase.auth.signInWithPassword({ email: email.trim(), password });
+      if (result.error) throw result.error;
+      setPassword('');
+      setNotice(result.data.session ? 'You are signed in.' : 'Account request received. Check your email to verify your address, then sign in.');
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Unable to connect. Please try again.');
+    } finally { setBusy(false); }
   }
   async function googleSignIn() {
     if (!supabase) { setNotice('Connect Supabase and configure Google OAuth before using Google sign-in.'); return; }
-    const { error } = await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.origin } });
-    if (error) setNotice(error.message);
+    setBusy(true);
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: authRedirectUrl() } });
+      if (error) throw error;
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Unable to start Google sign-in. Please try again.');
+    } finally { setBusy(false); }
+  }
+  async function signOut() {
+    if (!supabase) return;
+    setBusy(true);
+    try {
+      const { error } = await supabase.auth.signOut({ scope: 'local' });
+      if (error) throw error;
+      setModal(null);
+    } catch (error) {
+      setModal('signin');
+      setNotice(error instanceof Error ? error.message : 'Unable to sign out. Please try again.');
+    } finally { setBusy(false); }
   }
   async function submitProvider(e: React.FormEvent) {
     e.preventDefault(); setNotice('');
     if (!supabase) { setNotice('Connect Supabase first. Your provider details have not been saved.'); return; }
     setBusy(true);
-    const { data: sessionData } = await supabase.auth.getSession();
-    if (!sessionData.session) { setBusy(false); setNotice('Please create an account or sign in before registering a business.'); return; }
-    const { data, error } = await supabase.rpc('create_provider_profile', { p_business_name: providerBusiness, p_description: providerDescription, p_city: providerCity, p_country_code: providerCountry, p_category_slug: providerCategory });
-    setBusy(false);
-    if (error) setNotice(error.message); else setNotice(`Your provider profile has been saved as a draft (reference ${String(data).slice(0,8)}). It is not public until reviewed and approved.`);
+    try {
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError) throw sessionError;
+      if (!sessionData.session) { setNotice('Please create an account or sign in before registering a business.'); return; }
+      const { data, error } = await supabase.rpc('create_provider_profile', { p_business_name: providerBusiness, p_description: providerDescription, p_city: providerCity, p_country_code: providerCountry, p_category_slug: providerCategory });
+      if (error) throw error;
+      if (typeof data !== 'string' || !data) throw new Error('The server did not return a provider reference. Reopen this form to check whether your draft was saved before retrying.');
+      savedProvider.refresh();
+      setNotice(`Your provider profile has been saved as a draft (reference ${data.slice(0,8)}). It is not public until reviewed and approved.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Unable to confirm whether your draft was saved. Reopen this form to check before retrying.');
+    } finally { setBusy(false); }
   }
 
   return <div className="app-shell">
@@ -86,11 +133,12 @@ function App() {
           <a href="#explore" onClick={() => setMobileMenu(false)}>Explore services</a><a href="#how" onClick={() => setMobileMenu(false)}>How it works</a><a href="#trust" onClick={() => setMobileMenu(false)}>Trust & safety</a>
           <button className="mobile-theme" onClick={() => setDark(!dark)}>{dark ? <Sun size={17}/> : <Moon size={17}/>} Theme</button>
         </nav>
-        <div className="nav-actions"><button className="icon-btn theme-toggle" aria-label="Toggle theme" onClick={() => setDark(!dark)}>{dark ? <Sun size={18}/> : <Moon size={18}/>}</button><button className="text-btn sign-in" onClick={() => {setModal('signin');setNotice('')}}>Sign in</button><button className="btn btn-dark nav-cta" onClick={() => {setModal('signup');setNotice('')}}>Get started <ArrowUpRight size={16}/></button><button className="icon-btn menu-toggle" aria-label="Open menu" onClick={() => setMobileMenu(!mobileMenu)}>{mobileMenu ? <X/> : <Menu/>}</button></div>
+        <div className="nav-actions"><button className="icon-btn theme-toggle" aria-label="Toggle theme" onClick={() => setDark(!dark)}>{dark ? <Sun size={18}/> : <Moon size={18}/>}</button>{account.user ? <><button className="text-btn sign-in" disabled={busy} onClick={signOut}>Sign out</button><button className="btn btn-dark nav-cta" onClick={() => setModal('provider')}>My business <Store size={16}/></button></> : <><button className="text-btn sign-in" disabled={account.loading} onClick={() => {setModal('signin');setNotice('')}}>{account.loading ? 'Loading account…' : 'Sign in'}</button><button className="btn btn-dark nav-cta" disabled={account.loading} onClick={() => {setModal('signup');setNotice('')}}>Get started <ArrowUpRight size={16}/></button></>}<button className="icon-btn menu-toggle" aria-label="Open menu" onClick={() => setMobileMenu(!mobileMenu)}>{mobileMenu ? <X/> : <Menu/>}</button></div>
       </div>
     </header>
 
     <main id="top">
+      {account.error && <p className="notice-message section-wrap" role="alert">{account.error}</p>}
       <section className="hero section-wrap">
         <div className="hero-copy"><div className="eyebrow"><span className="eyebrow-line"/> YOUR LOCAL SERVICES, SORTED</div><h1>Find the right<br/><span>people for the job.</span></h1><p className="hero-lead">From the quick fix to the big project. Discover local professionals, compare your options and get the help you need.</p>
           <div className="search-panel"><div className="search-field"><Search size={20}/><input aria-label="Search services" value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => e.key === 'Enter' && document.getElementById('explore')?.scrollIntoView({behavior:'smooth'})} placeholder="What service do you need?"/><kbd>⌘ K</kbd></div><div className="search-divider"/><div className="location-field"><MapPin size={19}/><input aria-label="Location" value={location} onChange={e => setLocation(e.target.value)} /></div><button className="btn btn-orange search-submit" onClick={() => document.getElementById('explore')?.scrollIntoView({behavior:'smooth'})}>Find a pro <ArrowRight size={17}/></button></div>
@@ -124,7 +172,30 @@ function App() {
 
     {modal && <div className="modal-backdrop" role="presentation" onMouseDown={e => {if(e.target===e.currentTarget)setModal(null)}}><div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button className="modal-close" onClick={() => setModal(null)} aria-label="Close"><X size={20}/></button>
       {(modal==='signin'||modal==='signup') && <><div className="modal-logo"><img src="/trolley-logo.jpg" alt=""/></div><div className="modal-eyebrow">WELCOME TO TROLLEY</div><h2 id="modal-title">{modal==='signup'?'Create your account':'Good to see you again.'}</h2><p className="modal-intro">{modal==='signup'?'Join Trolley to connect with trusted local professionals.':'Sign in to manage your enquiries and saved providers.'}</p><form onSubmit={submitAuth} className="auth-form">{modal==='signup'&&<label>Full name<input required value={fullName} onChange={e=>setFullName(e.target.value)} placeholder="Your full name"/></label>}<label>Email address<input required type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com"/></label><label>Password<div className="password-input"><input required minLength={8} type={passwordVisible?'text':'password'} value={password} onChange={e=>setPassword(e.target.value)} placeholder="At least 8 characters"/><button type="button" onClick={()=>setPasswordVisible(!passwordVisible)}>{passwordVisible?<EyeOff size={17}/>:<Eye size={17}/>}</button></div></label>{modal==='signup'&&<label>Date of birth<input required type="date" value={age} onChange={e=>setAge(e.target.value)} max={new Date().toISOString().slice(0,10)}/><small className="field-hint">You must be at least 13 years old. Under-13 data is not saved.</small></label>}<button className="btn btn-dark auth-submit" disabled={busy}>{busy?'Please wait…':modal==='signup'?'Create account':'Sign in'} <ArrowRight size={16}/></button></form><div className="auth-divider"><span/>or<span/></div><button className="google-btn" onClick={googleSignIn}><span className="google-g">G</span> Continue with Google</button>{notice&&<div className="notice-message" role="status">{notice}</div>}<p className="modal-switch">{modal==='signup'?'Already have an account?':'New to Trolley?'} <button onClick={()=>{setModal(modal==='signup'?'signin':'signup');setNotice('')}}>{modal==='signup'?'Sign in':'Create account'}</button></p><p className="legal-mini">By continuing, you agree to our <button onClick={()=>setModal('terms')}>Terms</button> and <button onClick={()=>setModal('privacy')}>Privacy Policy</button>.</p></>}
-      {modal==='provider' && <><div className="modal-logo"><Store size={25}/></div><div className="modal-eyebrow">GROW WITH TROLLEY</div><h2 id="modal-title">Create your provider profile.</h2><p className="modal-intro">Start with your business details. Trolley saves this as a private draft; an administrator must review and approve it before customers can find it.</p><form className="auth-form" onSubmit={submitProvider}><label>Business name<input required minLength={2} maxLength={120} value={providerBusiness} onChange={e=>setProviderBusiness(e.target.value)} placeholder="e.g. Brightline Electrical"/></label><label>Main service category<select required value={providerCategory} onChange={e=>setProviderCategory(e.target.value)}>{providerOptions.map(c=><option key={c.id} value={c.slug}>{c.family} · {c.name}</option>)}</select></label><label>City<input required value={providerCity} onChange={e=>setProviderCity(e.target.value)} placeholder="Harare"/></label><label>Country<select value={providerCountry} onChange={e=>setProviderCountry(e.target.value)}><option value="ZW">Zimbabwe</option><option value="ZA">South Africa</option><option value="KE">Kenya</option><option value="BW">Botswana</option><option value="ZM">Zambia</option><option value="GB">United Kingdom</option><option value="US">United States</option></select></label><label>Short business description<textarea rows={3} maxLength={1200} value={providerDescription} onChange={e=>setProviderDescription(e.target.value)} placeholder="Tell customers what you do and the areas you serve."/></label><button className="btn btn-dark auth-submit" disabled={busy}>{busy?'Saving draft…':'Save provider draft'} <ArrowRight size={16}/></button></form>{notice&&<div className="notice-message" role="status">{notice}</div>}<p className="field-hint">You must be signed in. This step does not publish a listing or grant a verification badge.</p></>}
+      {modal==='provider' && <>
+        <div className="modal-logo"><Store size={25}/></div><div className="modal-eyebrow">GROW WITH TROLLEY</div>
+        <h2 id="modal-title">{savedProvider.profile ? 'Your saved provider profile.' : 'Create your provider profile.'}</h2>
+        {account.loading || savedProvider.loading ? <p role="status">Loading your saved profile…</p> : savedProvider.error ? <div className="notice-message" role="alert"><p>We could not check your saved provider profile: {savedProvider.error}</p><button className="btn btn-outline" onClick={savedProvider.refresh}>Retry</button></div> : savedProvider.profile ? <div className="auth-form">
+          <h3>{savedProvider.profile.business_name}</h3>
+          {savedProvider.profile.description && <p>{savedProvider.profile.description}</p>}
+          <p className="field-hint">Saved reference: {savedProvider.profile.id}. This profile was loaded from your account, not just this browser. Creating a draft does not publish a listing or grant a verification badge.</p>
+        </div> : !account.user ? <>
+          <p className="modal-intro">Sign in or create an account before saving a private provider draft.</p>
+          <button className="btn btn-dark auth-submit" onClick={() => setModal('signin')}>Sign in <ArrowRight size={16}/></button>
+          <button className="subtle-link" onClick={() => setModal('signup')}>Create account</button>
+        </> : <>
+          <p className="modal-intro">Start with your business details. Trolley saves this as a private draft; an administrator must review and approve it before customers can find it.</p>
+          <form className="auth-form" onSubmit={submitProvider}>
+            <label>Business name<input required minLength={2} maxLength={120} value={providerBusiness} onChange={e=>setProviderBusiness(e.target.value)} placeholder="e.g. Brightline Electrical"/></label>
+            <label>Main service category<select required value={providerCategory} onChange={e=>setProviderCategory(e.target.value)}>{providerOptions.map(c=><option key={c.id} value={c.slug}>{c.family} · {c.name}</option>)}</select></label>
+            <label>City<input required minLength={2} maxLength={100} value={providerCity} onChange={e=>setProviderCity(e.target.value)} placeholder="Harare"/></label>
+            <label>Country<select value={providerCountry} onChange={e=>setProviderCountry(e.target.value)}><option value="ZW">Zimbabwe</option><option value="ZA">South Africa</option><option value="KE">Kenya</option><option value="BW">Botswana</option><option value="ZM">Zambia</option><option value="GB">United Kingdom</option><option value="US">United States</option></select></label>
+            <label>Short business description<textarea rows={3} maxLength={1200} value={providerDescription} onChange={e=>setProviderDescription(e.target.value)} placeholder="Tell customers what you do and the areas you serve."/></label>
+            <button className="btn btn-dark auth-submit" disabled={busy}>{busy?'Saving draft…':'Save provider draft'} <ArrowRight size={16}/></button>
+          </form>
+        </>}
+        {notice&&<div className="notice-message" role="status">{notice}</div>}
+      </>}
       {(modal==='privacy'||modal==='terms') && <><div className="modal-eyebrow">TROLLEY POLICIES · DRAFT</div><h2 id="modal-title">{modal==='privacy'?'Privacy at Trolley':'Trolley terms of service'}</h2><p className="modal-intro">{modal==='privacy'?'This initial privacy notice describes the intended data principles. A jurisdiction-specific legal review and final policy are required before public launch.':'These draft terms outline the intended marketplace relationship. They are not final legal terms and require professional review before launch.'}</p><div className="policy-scroll">{modal==='privacy'?<><h3>Information and purpose</h3><p>Trolley is designed to collect only information needed to create accounts, operate provider profiles, support enquiries and protect the marketplace. Account details, service enquiries and uploaded profile content are handled according to role-based access rules.</p><h3>Consent and analytics</h3><p>Non-essential analytics and tracking must remain disabled until a user gives consent. Rejecting optional analytics must be as easy as accepting them. Essential application storage may still be used to provide core functionality.</p><h3>Security and access</h3><p>Private records are protected by server-side authorization and database Row Level Security. Users should only be able to access their own private data and conversations they participate in. Verification documents are private.</p><h3>Your choices</h3><p>Users will be able to request access, correction, export or deletion of their personal information where supported by applicable law. Contact details and final retention periods will be published before launch.</p></>:<><h3>Marketplace role</h3><p>Trolley helps customers discover independent service providers. Providers are responsible for the services, qualifications, quotations and work they offer. A directory listing is not a guarantee of service quality.</p><h3>Listings and reviews</h3><p>Providers must supply accurate information and may only publish listings after required checks. Reviews must reflect genuine eligible interactions and may be moderated for abuse or policy violations.</p><h3>Quotations and payments</h3><p>A quotation is not a confirmed booking or payment. Subscription prices, renewal dates, cancellation methods and applicable refund terms must be shown clearly before purchase. Payment status is confirmed by the payment provider, not a browser message.</p><h3>Safe use</h3><p>Users must not impersonate others, submit fraudulent listings, harass other users or misuse personal information. Reporting, blocking and appeals will be provided as marketplace features are completed.</p></>}</div><button className="btn btn-dark auth-submit" onClick={()=>setModal(null)}>Close</button></>}
     </div></div>}
   </div>;

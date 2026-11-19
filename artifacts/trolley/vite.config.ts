@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { databaseSetupDownload } from './scripts/database-setup-download';
 
 // The managed Replit workflow supplies PORT and BASE_PATH. Keep local Vite
 // defaults available so the imported project also runs outside Replit.
@@ -9,7 +10,7 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
 }
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), databaseSetupDownload()],
   base: process.env.BASE_PATH || '/',
   // Use a modern browser target compatible with the workspace's secured
   // esbuild version and Supabase's current browser client.

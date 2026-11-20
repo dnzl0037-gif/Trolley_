@@ -25,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.rounded.CalendarMonth
+import androidx.compose.material.icons.rounded.CreditCard
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Storefront
 import androidx.compose.material.icons.rounded.VerifiedUser
@@ -59,10 +60,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
 import com.example.data.catalog.GeographyCatalog
 import com.example.data.catalog.ServiceTaxonomy
+import com.example.data.catalog.SubscriptionTier
+import com.example.data.catalog.formatUsdCents
 import com.example.data.firebase.AuthManager
 import com.example.data.firebase.GoogleSignInResult
 import com.example.data.location.AddressGeocoder
 import com.example.data.model.ProviderProfile
+import com.example.data.model.ProviderSubscription
 import com.example.data.model.UiState
 import com.example.data.model.UserAccount
 import com.example.ui.components.PickerOption
@@ -87,6 +91,8 @@ fun ProviderScreen(
     userDisplayName: String,
     userEmail: String?,
     onSignedOut: () -> Unit,
+    onProviderDraftCreated: () -> Unit = {},
+    onOpenBilling: () -> Unit = {},
     contentPadding: PaddingValues = PaddingValues(0.dp),
 ) {
     val context = LocalContext.current
@@ -95,6 +101,7 @@ fun ProviderScreen(
     val profileState by viewModel.providerProfileState.collectAsStateWithLifecycle()
     val ownReviewsState by viewModel.ownReviewsState.collectAsStateWithLifecycle()
     val ownRatingSummary by viewModel.ownRatingSummary.collectAsStateWithLifecycle()
+    val ownSubscription by viewModel.ownSubscriptionState.collectAsStateWithLifecycle()
     val isBusy by viewModel.isBusy.collectAsStateWithLifecycle()
     val notice by viewModel.notice.collectAsStateWithLifecycle()
     var remainingFreshMs by remember { mutableStateOf(AuthManager.remainingFreshVerificationMillis()) }
@@ -262,6 +269,7 @@ fun ProviderScreen(
                                                 businessAddress = address,
                                                 latitude = coords?.latitude,
                                                 longitude = coords?.longitude,
+                                                onCreated = onProviderDraftCreated,
                                             )
                                         }
                                     },
@@ -322,6 +330,11 @@ fun ProviderScreen(
 
             val savedProfile = (profileState as? UiState.Success)?.data
             if (savedProfile != null) {
+                ProviderBillingSummaryCard(
+                    subscription = ownSubscription,
+                    onManageBilling = onOpenBilling,
+                )
+
                 Surface(
                     shape = RoundedCornerShape(19.dp),
                     color = MaterialTheme.colorScheme.surface,
@@ -1002,5 +1015,87 @@ private fun NoticeBox(notice: MutationNotice) {
                 .padding(12.dp)
                 .testTag("provider_notice_text"),
         )
+    }
+}
+
+@Composable
+private fun ProviderBillingSummaryCard(
+    subscription: ProviderSubscription?,
+    onManageBilling: () -> Unit,
+) {
+    val tier = SubscriptionTier.fromId(subscription?.planTier.orEmpty()) ?: SubscriptionTier.FREE_STARTER
+    Surface(
+        shape = RoundedCornerShape(19.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, TrolleyTheme.colors.hairline),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("provider_billing_summary_card"),
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.CreditCard,
+                        contentDescription = null,
+                        tint = TrolleyTheme.colors.orange,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Text(
+                        text = "PROVIDER BILLING & SUBSCRIPTION",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TrolleyTheme.colors.orange,
+                    )
+                }
+                Surface(
+                    shape = RoundedCornerShape(999.dp),
+                    color = TrolleyTheme.colors.lime,
+                ) {
+                    Text(
+                        text = if (subscription == null) "CHOOSE PLAN" else tier.title.uppercase(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TrolleyTheme.colors.limeDeep,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                    )
+                }
+            }
+
+            Text(
+                text = if (subscription == null) {
+                    "Activate Starter Free (4 free limited features) or upgrade to Growth Pro ($4.99) / Business Elite ($9.99) with 30% annual savings."
+                } else {
+                    val limitLabel = if (subscription.monthlyBookingLimit >= 9999) {
+                        "Unlimited bookings/mo"
+                    } else {
+                        "${subscription.monthlyBookingLimit} bookings/mo cap"
+                    }
+                    "${tier.title} · ${formatUsdCents(subscription.amountCents)}/${subscription.billingCycle} · $limitLabel · ${subscription.maskedInstrument ?: "Free"}"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = TrolleyTheme.colors.mutedInk,
+            )
+
+            OutlinedButton(
+                onClick = onManageBilling,
+                shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(1.dp, TrolleyTheme.colors.hairline),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .minimumInteractiveComponentSize()
+                    .testTag("open_provider_billing_button"),
+            ) {
+                Text("Manage Billing & Subscription Plans (EcoCash, Visa, Mastercard)")
+            }
+        }
     }
 }

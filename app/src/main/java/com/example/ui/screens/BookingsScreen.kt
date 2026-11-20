@@ -23,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AccessTime
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.CalendarMonth
+import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.CheckCircleOutline
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DoneAll
@@ -72,6 +73,7 @@ fun BookingsScreen(
     onOpenNewBookingSheet: () -> Unit,
     onRescheduleBooking: (BookingRequest) -> Unit,
     onViewProviderProfile: (String) -> Unit = {},
+    onMessageParticipant: (BookingRequest) -> Unit = {},
     onBrowseProvidersClick: () -> Unit,
     contentPadding: PaddingValues = PaddingValues(0.dp),
 ) {
@@ -351,6 +353,7 @@ fun BookingsScreen(
                                 isProviderView = selectedTab == 1,
                                 isBusy = isBusy,
                                 onViewProviderProfile = { onViewProviderProfile(booking.providerId) },
+                                onMessageParticipant = { onMessageParticipant(booking) },
                                 onReschedule = { onRescheduleBooking(booking) },
                                 onCustomerCancel = {
                                     viewModel.updateStatus(booking, nextStatus = "cancelled", asProvider = false)
@@ -413,6 +416,7 @@ private fun BookingItemCard(
     isProviderView: Boolean,
     isBusy: Boolean,
     onViewProviderProfile: () -> Unit,
+    onMessageParticipant: () -> Unit,
     onReschedule: () -> Unit,
     onCustomerCancel: () -> Unit,
     onProviderAccept: () -> Unit,
@@ -591,6 +595,34 @@ private fun BookingItemCard(
                             "View provider profile & reviews"
                         },
                         color = TrolleyTheme.colors.limeAccent,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+
+            if (booking.customerId != booking.providerUserId) {
+                val chatInteraction = remember { MutableInteractionSource() }
+                OutlinedButton(
+                    onClick = onMessageParticipant,
+                    interactionSource = chatInteraction,
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, TrolleyTheme.colors.hairline),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .trolleySpringPress(chatInteraction)
+                        .minimumInteractiveComponentSize()
+                        .testTag("booking_chat_${booking.id}"),
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.ChatBubbleOutline,
+                        contentDescription = null,
+                        tint = TrolleyTheme.colors.limeAccent,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = if (isProviderView) "Message client" else "Chat with provider",
+                        color = MaterialTheme.colorScheme.onSurface,
                         fontWeight = FontWeight.Bold,
                     )
                 }

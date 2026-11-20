@@ -759,4 +759,768 @@ test("ProviderReview: authenticated feedback, 1..5 rating bounds, linked provide
   await assertSucceeds(aliceDb.collection("reviews").doc(validReviewId).delete());
 });
 
+test("Hardcore Red-Team: self-review rating inflation and invalid ID/timestamp spoofing denied", async () => {
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  const created = new Date(Date.now() - 10000);
+  const futureTime = new Date(Date.now() + 120000);
 
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await context.firestore().collection("providerProfiles").doc(BOB_UID).set({
+      userId: BOB_UID,
+      businessName: "Approved Harare Plumbing",
+      categorySlug: "plumbing-leak-detection",
+      categoryName: "Leak detection",
+      countryCode: "ZW",
+      city: "Harare",
+      listingStatus: "published",
+      verificationStatus: "approved",
+      createdAt: created,
+      updatedAt: created,
+    });
+  });
+
+  // Provider Bob cannot inflate his own star score by submitting a self-review
+  await assertFails(
+    bobDb.collection("reviews").doc(`${BOB_UID}__${BOB_UID}`).set({
+      providerId: BOB_UID,
+      providerUserId: BOB_UID,
+      customerId: BOB_UID,
+      reviewerName: "Bob",
+      rating: 5,
+      comment: "Self-inflated five star rating attempt.",
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+
+  // Path-traversal / non-regex document ID and future timestamps rejected
+  await assertFails(
+    aliceDb.collection("users").doc("alice_123").set({
+      userId: ALICE_UID,
+      fullName: "Alice",
+      ageVerified: true,
+      createdAt: futureTime,
+      updatedAt: futureTime,
+    })
+  );
+  await assertFails(
+    aliceDb.collection("bookings").doc("bad.id!invalid").set({
+      customerId: ALICE_UID,
+      customerName: "Alice",
+      providerId: BOB_UID,
+      providerUserId: BOB_UID,
+      providerBusinessName: "Approved Harare Plumbing",
+      categorySlug: "plumbing-leak-detection",
+      categoryName: "Leak detection",
+      providerLocation: "Harare, ZW",
+      scheduledDate: "2026-11-25",
+      scheduledTime: "10:00",
+      status: "pending",
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+});
+
+test("ProviderSubscription: pricing matrix, free-tier limits, price tampering denial, and owner isolation", async () => {
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  const unauthDb = testEnv.unauthenticatedContext().firestore();
+  const created = new Date(Date.now() - 10000);
+  const updated = new Date(Date.now() - 1000);
+
+  // Unauthenticated access denied
+  await assertFails(unauthDb.collection("providerSubscriptions").doc(ALICE_UID).get());
+  await assertFails(unauthDb.collection("providerSubscriptions").where("userId", "==", ALICE_UID).get());
+
+  // Orphan subscription without a /providerProfiles/{uid} document fails
+  await assertFails(
+    aliceDb.collection("providerSubscriptions").doc(ALICE_UID).set({
+      userId: ALICE_UID,
+      providerId: ALICE_UID,
+      businessName: "Alice Electrical",
+      planTier: "free_starter",
+      billingCycle: "monthly",
+      paymentMethod: "none",
+      currency: "USD",
+      amountCents: 0,
+      monthlyBookingLimit: 3,
+      maxCategories: 1,
+      subscriptionStatus: "active",
+      autoRenew: false,
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+
+  // Create Alice's provider profile first
+  await assertSucceeds(
+    aliceDb.collection("providerProfiles").doc(ALICE_UID).set({
+      userId: ALICE_UID,
+      businessName: "Alice Electrical",
+      categorySlug: "electrical-wiring-installation",
+      categoryName: "Wiring installation",
+      countryCode: "ZW",
+      city: "Harare",
+      listingStatus: "draft",
+      verificationStatus: "not_submitted",
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+
+  // Price tampering attack: Business Elite annual at $0.00 or $1.00 instead of $83.92 (8392 cents) rejected
+  await assertFails(
+    aliceDb.collection("providerSubscriptions").doc(ALICE_UID).set({
+      userId: ALICE_UID,
+      providerId: ALICE_UID,
+      businessName: "Alice Electrical",
+      planTier: "business_elite",
+      billingCycle: "yearly",
+      paymentMethod: "ecocash",
+      currency: "USD",
+      amountCents: 100,
+      monthlyBookingLimit: 9999,
+      maxCategories: 10,
+      subscriptionStatus: "active",
+      autoRenew: true,
+      maskedInstrument: "EcoCash +263 77***1234",
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+
+  // Free-tier quota bypass attack (claiming 9999 bookings on free_starter) rejected
+  await assertFails(
+    aliceDb.collection("providerSubscriptions").doc(ALICE_UID).set({
+      userId: ALICE_UID,
+      providerId: ALICE_UID,
+      businessName: "Alice Electrical",
+      planTier: "free_starter",
+      billingCycle: "monthly",
+      paymentMethod: "none",
+      currency: "USD",
+      amountCents: 0,
+      monthlyBookingLimit: 9999,
+      maxCategories: 1,
+      subscriptionStatus: "active",
+      autoRenew: false,
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+
+  // Valid Free Starter subscription succeeds
+  await assertSucceeds(
+    aliceDb.collection("providerSubscriptions").doc(ALICE_UID).set({
+      userId: ALICE_UID,
+      providerId: ALICE_UID,
+      businessName: "Alice Electrical",
+      planTier: "free_starter",
+      billingCycle: "monthly",
+      paymentMethod: "none",
+      currency: "USD",
+      amountCents: 0,
+      monthlyBookingLimit: 3,
+      maxCategories: 1,
+      subscriptionStatus: "active",
+      autoRenew: false,
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+
+  // Bob cannot read or hijack Alice's subscription; unfiltered list denied
+  await assertFails(bobDb.collection("providerSubscriptions").doc(ALICE_UID).get());
+  await assertFails(aliceDb.collection("providerSubscriptions").get());
+  await assertSucceeds(aliceDb.collection("providerSubscriptions").where("userId", "==", ALICE_UID).get());
+
+  // Paid subscription upgrade WITHOUT a valid 2FA financialVerifications record must fail
+  await assertFails(
+    aliceDb.collection("providerSubscriptions").doc(ALICE_UID).update({
+      planTier: "business_elite",
+      billingCycle: "yearly",
+      paymentMethod: "ecocash",
+      amountCents: 8392,
+      monthlyBookingLimit: 9999,
+      maxCategories: 10,
+      subscriptionStatus: "pending_confirmation",
+      autoRenew: true,
+      maskedInstrument: "EcoCash +263 77***4567",
+      updatedAt: updated,
+    })
+  );
+
+  // Create valid 2FA verification audit record for Alice
+  const nowSec = Math.floor(Date.now() / 1000) - 5;
+  await assertSucceeds(
+    aliceDb.collection("financialVerifications").doc("ver_alice_1").set({
+      userId: ALICE_UID,
+      providerId: ALICE_UID,
+      verificationMethod: "firebase_reauth_and_totp",
+      reauthenticated: true,
+      totpVerified: true,
+      firebaseAuthTimeSeconds: nowSec,
+      actionType: "activate_subscription",
+      verifiedAt: updated,
+    })
+  );
+
+  // Valid upgrade to Business Elite Yearly ($9.99 * 12 * 0.70 = $83.92 -> 8392 cents) via EcoCash succeeds with verificationId
+  await assertSucceeds(
+    aliceDb.collection("providerSubscriptions").doc(ALICE_UID).update({
+      planTier: "business_elite",
+      billingCycle: "yearly",
+      paymentMethod: "ecocash",
+      amountCents: 8392,
+      monthlyBookingLimit: 9999,
+      maxCategories: 10,
+      subscriptionStatus: "pending_confirmation",
+      autoRenew: true,
+      maskedInstrument: "EcoCash +263 77***4567",
+      verificationId: "ver_alice_1",
+      updatedAt: updated,
+    })
+  );
+
+  // Raw unmasked card/phone (>5 consecutive digits) rejected by PCI/PII safety rule
+  await assertFails(
+    aliceDb.collection("providerSubscriptions").doc(ALICE_UID).update({
+      maskedInstrument: "Visa 4111111111111111",
+      verificationId: "ver_alice_1",
+      updatedAt: updated,
+    })
+  );
+
+  // Delete denied
+  await assertFails(aliceDb.collection("providerSubscriptions").doc(ALICE_UID).delete());
+});
+
+test("BillingPayment: PCI PAN/CVV ghost-field blocking, 30% discount math, 2FA verification link, and immutable ledger", async () => {
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  const unauthDb = testEnv.unauthenticatedContext().firestore();
+  const created = new Date(Date.now() - 10000);
+  const nowSec = Math.floor(Date.now() / 1000) - 5;
+
+  await assertSucceeds(
+    aliceDb.collection("providerProfiles").doc(ALICE_UID).set({
+      userId: ALICE_UID,
+      businessName: "Alice Electrical",
+      categorySlug: "electrical-wiring-installation",
+      categoryName: "Wiring installation",
+      countryCode: "ZW",
+      city: "Harare",
+      listingStatus: "draft",
+      verificationStatus: "not_submitted",
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+
+  await assertSucceeds(
+    aliceDb.collection("financialVerifications").doc("ver_pay_1").set({
+      userId: ALICE_UID,
+      providerId: ALICE_UID,
+      verificationMethod: "firebase_reauth_and_totp",
+      reauthenticated: true,
+      totpVerified: true,
+      firebaseAuthTimeSeconds: nowSec,
+      actionType: "activate_subscription",
+      verifiedAt: created,
+    })
+  );
+
+  // Paid payment receipt missing verificationId rejected
+  await assertFails(
+    aliceDb.collection("billingPayments").doc("pay_no_2fa").set({
+      userId: ALICE_UID,
+      providerId: ALICE_UID,
+      planTier: "business_elite",
+      billingCycle: "yearly",
+      paymentMethod: "visa",
+      currency: "USD",
+      subtotalCents: 11988,
+      discountCents: 3596,
+      amountCents: 8392,
+      maskedInstrument: "Visa •••• 4242",
+      invoiceNumber: "INV-2026-NO2FA",
+      paymentStatus: "authorized",
+      createdAt: created,
+    })
+  );
+
+  // Ghost PCI fields (cvv / cardNumber) rejected
+  await assertFails(
+    aliceDb.collection("billingPayments").doc("pay_pci_leak").set({
+      userId: ALICE_UID,
+      providerId: ALICE_UID,
+      planTier: "business_elite",
+      billingCycle: "monthly",
+      paymentMethod: "visa",
+      currency: "USD",
+      subtotalCents: 999,
+      discountCents: 0,
+      amountCents: 999,
+      maskedInstrument: "Visa •••• 4242",
+      invoiceNumber: "INV-2026-0001",
+      paymentStatus: "authorized",
+      verificationId: "ver_pay_1",
+      cvv: "123",
+      createdAt: created,
+    })
+  );
+
+  // Unmasked 16-digit PAN inside maskedInstrument rejected
+  await assertFails(
+    aliceDb.collection("billingPayments").doc("pay_raw_pan").set({
+      userId: ALICE_UID,
+      providerId: ALICE_UID,
+      planTier: "business_elite",
+      billingCycle: "monthly",
+      paymentMethod: "mastercard",
+      currency: "USD",
+      subtotalCents: 999,
+      discountCents: 0,
+      amountCents: 999,
+      maskedInstrument: "5500000000000004",
+      invoiceNumber: "INV-2026-0002",
+      paymentStatus: "authorized",
+      verificationId: "ver_pay_1",
+      createdAt: created,
+    })
+  );
+
+  // Fake discount math (claiming $80 discount on $9.99 monthly) rejected
+  await assertFails(
+    aliceDb.collection("billingPayments").doc("pay_bad_math").set({
+      userId: ALICE_UID,
+      providerId: ALICE_UID,
+      planTier: "business_elite",
+      billingCycle: "monthly",
+      paymentMethod: "paypal",
+      currency: "USD",
+      subtotalCents: 999,
+      discountCents: 800,
+      amountCents: 199,
+      maskedInstrument: "PayPal alice@example.com",
+      invoiceNumber: "INV-2026-0003",
+      paymentStatus: "authorized",
+      verificationId: "ver_pay_1",
+      createdAt: created,
+    })
+  );
+
+  // Valid Business Elite Yearly Visa receipt (30% off $119.88 -> $83.92) succeeds with verificationId
+  await assertSucceeds(
+    aliceDb.collection("billingPayments").doc("pay_valid_1").set({
+      userId: ALICE_UID,
+      providerId: ALICE_UID,
+      planTier: "business_elite",
+      billingCycle: "yearly",
+      paymentMethod: "visa",
+      currency: "USD",
+      subtotalCents: 11988,
+      discountCents: 3596,
+      amountCents: 8392,
+      maskedInstrument: "Visa •••• 4242",
+      invoiceNumber: "INV-2026-8392",
+      paymentStatus: "authorized",
+      verificationId: "ver_pay_1",
+      createdAt: created,
+    })
+  );
+
+  // Owner scoped query succeeds; unfiltered query, cross-user read, unauth read, update, and delete ALL fail
+  await assertSucceeds(aliceDb.collection("billingPayments").where("userId", "==", ALICE_UID).get());
+  await assertFails(aliceDb.collection("billingPayments").get());
+  await assertFails(bobDb.collection("billingPayments").doc("pay_valid_1").get());
+  await assertFails(unauthDb.collection("billingPayments").doc("pay_valid_1").get());
+  await assertFails(
+    aliceDb.collection("billingPayments").doc("pay_valid_1").update({
+      amountCents: 0,
+    })
+  );
+  await assertFails(aliceDb.collection("billingPayments").doc("pay_valid_1").delete());
+});
+
+test("FinancialTwoFactor: providerSecurity secret-leak denial, stale authTimestamp blocking, and immutable 2FA audit trail", async () => {
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  const unauthDb = testEnv.unauthenticatedContext().firestore();
+  const created = new Date(Date.now() - 8000);
+  const validSha256 = "a".repeat(64);
+
+  // Plaintext Base32 secret instead of 64-char SHA-256 hex digest is rejected
+  await assertFails(
+    aliceDb.collection("providerSecurity").doc(ALICE_UID).set({
+      userId: ALICE_UID,
+      providerId: ALICE_UID,
+      twoFactorEnabled: true,
+      twoFactorType: "totp_authenticator",
+      secretFingerprint: "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP",
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+
+  // Extra raw secret ghost field rejected
+  await assertFails(
+    aliceDb.collection("providerSecurity").doc(ALICE_UID).set({
+      userId: ALICE_UID,
+      providerId: ALICE_UID,
+      twoFactorEnabled: true,
+      twoFactorType: "totp_authenticator",
+      secretFingerprint: validSha256,
+      rawSecret: "JBSWY3DPEHPK3PXP",
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+
+  // Valid owner 2FA metadata succeeds; cross-user / unauth / delete rejected
+  await assertSucceeds(
+    aliceDb.collection("providerSecurity").doc(ALICE_UID).set({
+      userId: ALICE_UID,
+      providerId: ALICE_UID,
+      twoFactorEnabled: true,
+      twoFactorType: "totp_authenticator",
+      secretFingerprint: validSha256,
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+  await assertFails(bobDb.collection("providerSecurity").doc(ALICE_UID).get());
+  await assertFails(unauthDb.collection("providerSecurity").doc(ALICE_UID).get());
+  await assertFails(aliceDb.collection("providerSecurity").doc(ALICE_UID).delete());
+
+  // Stale Firebase Auth timestamp (>15 min old) rejected on financialVerifications
+  const staleAuthTime = Math.floor(Date.now() / 1000) - 2000;
+  await assertFails(
+    aliceDb.collection("financialVerifications").doc("ver_stale").set({
+      userId: ALICE_UID,
+      providerId: ALICE_UID,
+      verificationMethod: "firebase_reauth_and_totp",
+      reauthenticated: true,
+      totpVerified: true,
+      firebaseAuthTimeSeconds: staleAuthTime,
+      actionType: "activate_subscription",
+      verifiedAt: created,
+    })
+  );
+
+  // Unverified Factor-2 (totpVerified = false) rejected
+  const freshAuthTime = Math.floor(Date.now() / 1000) - 5;
+  await assertFails(
+    aliceDb.collection("financialVerifications").doc("ver_unverified").set({
+      userId: ALICE_UID,
+      providerId: ALICE_UID,
+      verificationMethod: "firebase_reauth_and_totp",
+      reauthenticated: true,
+      totpVerified: false,
+      firebaseAuthTimeSeconds: freshAuthTime,
+      actionType: "activate_subscription",
+      verifiedAt: created,
+    })
+  );
+
+  // Valid verification succeeds, and cannot be updated, deleted, or stolen by Bob
+  await assertSucceeds(
+    aliceDb.collection("financialVerifications").doc("ver_good").set({
+      userId: ALICE_UID,
+      providerId: ALICE_UID,
+      verificationMethod: "firebase_reauth_and_totp",
+      reauthenticated: true,
+      totpVerified: true,
+      firebaseAuthTimeSeconds: freshAuthTime,
+      actionType: "switch_plan",
+      verifiedAt: created,
+    })
+  );
+  await assertFails(bobDb.collection("financialVerifications").doc("ver_good").get());
+  await assertFails(
+    aliceDb.collection("financialVerifications").doc("ver_good").update({ totpVerified: false })
+  );
+  await assertFails(aliceDb.collection("financialVerifications").doc("ver_good").delete());
+});
+
+test("PreBookingChat: real-time threads & messages enforce participant isolation, anti-spoofing, batch integrity, and query scoping", async () => {
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  const eveDb = testEnv.authenticatedContext("eve_789").firestore();
+  const unauthDb = testEnv.unauthenticatedContext().firestore();
+  const now = new Date(Date.now() - 5000);
+
+  // Seed Bob's published provider listing
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await context.firestore().collection("providerProfiles").doc(BOB_UID).set({
+      userId: BOB_UID,
+      businessName: "Bob Electrical & Solar",
+      categorySlug: "solar-inverter",
+      categoryName: "Solar & Inverter",
+      countryCode: "ZW",
+      city: "Harare",
+      listingStatus: "published",
+      verificationStatus: "not_submitted",
+      createdAt: now,
+      updatedAt: now,
+    });
+  });
+
+  const threadId = `${BOB_UID}__${ALICE_UID}`;
+
+  // Self-chat (Bob messaging his own provider listing) denied
+  await assertFails(
+    bobDb.collection("chatThreads").doc(`${BOB_UID}__${BOB_UID}`).set({
+      customerId: BOB_UID,
+      providerId: BOB_UID,
+      providerUserId: BOB_UID,
+      participantIds: [BOB_UID, BOB_UID],
+      customerName: "Bob",
+      providerBusinessName: "Bob Electrical & Solar",
+      providerCategoryName: "Solar & Inverter",
+      lastMessageText: "Self message",
+      lastSenderId: BOB_UID,
+      messageCount: 1,
+      createdAt: now,
+      updatedAt: now,
+    })
+  );
+
+  // Atomic WriteBatch: Alice initiates pre-booking chat thread + first inquiry message
+  const initBatch = aliceDb.batch();
+  initBatch.set(aliceDb.collection("chatThreads").doc(threadId), {
+    customerId: ALICE_UID,
+    providerId: BOB_UID,
+    providerUserId: BOB_UID,
+    participantIds: [ALICE_UID, BOB_UID],
+    customerName: "Alice Moyo",
+    providerBusinessName: "Bob Electrical & Solar",
+    providerCategoryName: "Solar & Inverter",
+    lastMessageText: "Hi Bob, can you install a 5kVA inverter this Friday?",
+    lastSenderId: ALICE_UID,
+    messageCount: 1,
+    lastCustomerReadAt: now,
+    createdAt: now,
+    updatedAt: now,
+  });
+  initBatch.set(aliceDb.collection("chatThreads").doc(threadId).collection("messages").doc("msg_1"), {
+    threadId,
+    providerId: BOB_UID,
+    providerUserId: BOB_UID,
+    customerId: ALICE_UID,
+    participantIds: [ALICE_UID, BOB_UID],
+    senderId: ALICE_UID,
+    senderName: "Alice Moyo",
+    body: "Hi Bob, can you install a 5kVA inverter this Friday?",
+    messageType: "pre_booking_inquiry",
+    clientSentMillis: Date.now() - 5000,
+    sentAt: now,
+  });
+  await assertSucceeds(initBatch.commit());
+
+  // Both Alice and Bob can query their scoped inbox & subcollection messages
+  await assertSucceeds(
+    aliceDb.collection("chatThreads").where("participantIds", "array-contains", ALICE_UID).get()
+  );
+  await assertSucceeds(
+    bobDb.collection("chatThreads").where("participantIds", "array-contains", BOB_UID).get()
+  );
+  await assertSucceeds(
+    bobDb.collection("chatThreads").doc(threadId).collection("messages")
+      .where("participantIds", "array-contains", BOB_UID).get()
+  );
+
+  // Third party (Eve) & unauthenticated user CANNOT read, list, or inject into thread
+  await assertFails(eveDb.collection("chatThreads").doc(threadId).get());
+  await assertFails(
+    eveDb.collection("chatThreads").where("participantIds", "array-contains", ALICE_UID).get()
+  );
+  await assertFails(
+    eveDb.collection("chatThreads").doc(threadId).collection("messages")
+      .where("participantIds", "array-contains", BOB_UID).get()
+  );
+  await assertFails(unauthDb.collection("chatThreads").doc(threadId).get());
+
+  // Unfiltered list queries rejected
+  await assertFails(aliceDb.collection("chatThreads").get());
+  await assertFails(aliceDb.collection("chatThreads").doc(threadId).collection("messages").get());
+
+  // Bob replies via atomic batch updating thread preview & messageCount
+  const replyTime = new Date(Date.now() - 2000);
+  const replyBatch = bobDb.batch();
+  replyBatch.update(bobDb.collection("chatThreads").doc(threadId), {
+    lastMessageText: "Yes Alice! Friday 10:00 AM works, and cables are included.",
+    lastSenderId: BOB_UID,
+    messageCount: 2,
+    lastProviderReadAt: replyTime,
+    updatedAt: replyTime,
+  });
+  replyBatch.set(bobDb.collection("chatThreads").doc(threadId).collection("messages").doc("msg_2"), {
+    threadId,
+    providerId: BOB_UID,
+    providerUserId: BOB_UID,
+    customerId: ALICE_UID,
+    participantIds: [ALICE_UID, BOB_UID],
+    senderId: BOB_UID,
+    senderName: "Bob Electrical & Solar",
+    body: "Yes Alice! Friday 10:00 AM works, and cables are included.",
+    messageType: "text",
+    clientSentMillis: Date.now() - 2000,
+    sentAt: replyTime,
+  });
+  await assertSucceeds(replyBatch.commit());
+
+  // Spoofing senderId (Bob pretending to be Alice) rejected
+  await assertFails(
+    bobDb.collection("chatThreads").doc(threadId).collection("messages").doc("msg_spoof").set({
+      threadId,
+      providerId: BOB_UID,
+      providerUserId: BOB_UID,
+      customerId: ALICE_UID,
+      participantIds: [ALICE_UID, BOB_UID],
+      senderId: ALICE_UID,
+      senderName: "Alice Moyo",
+      body: "Spoofed message",
+      messageType: "text",
+      clientSentMillis: Date.now() - 1000,
+      sentAt: new Date(Date.now() - 1000),
+    })
+  );
+
+  // Oversized message (> 1000 chars) rejected
+  await assertFails(
+    aliceDb.collection("chatThreads").doc(threadId).collection("messages").doc("msg_big").set({
+      threadId,
+      providerId: BOB_UID,
+      providerUserId: BOB_UID,
+      customerId: ALICE_UID,
+      participantIds: [ALICE_UID, BOB_UID],
+      senderId: ALICE_UID,
+      senderName: "Alice Moyo",
+      body: "x".repeat(1001),
+      messageType: "text",
+      clientSentMillis: Date.now() - 1000,
+      sentAt: new Date(Date.now() - 1000),
+    })
+  );
+
+  // Sent messages & threads are immutable against edit/delete
+  await assertFails(
+    aliceDb.collection("chatThreads").doc(threadId).collection("messages").doc("msg_1").update({ body: "Edited" })
+  );
+  await assertFails(
+    aliceDb.collection("chatThreads").doc(threadId).collection("messages").doc("msg_1").delete()
+  );
+  await assertFails(aliceDb.collection("chatThreads").doc(threadId).delete());
+});
+
+test("CommunityChat: everyone signed in can communicate with strict 3-second server cooldown enforcement", async () => {
+  const firebaseCompat = (() => {
+    try {
+      const app = require("firebase/compat/app");
+      require("firebase/compat/firestore");
+      return app;
+    } catch (_) {
+      const app = require("/usr/local/lib/node_modules/@firebase/rules-unit-testing/node_modules/firebase/compat/app");
+      require("/usr/local/lib/node_modules/@firebase/rules-unit-testing/node_modules/firebase/compat/firestore");
+      return app;
+    }
+  })();
+  const serverTs = () => firebaseCompat.firestore.FieldValue.serverTimestamp();
+
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  const unauthDb = testEnv.unauthenticatedContext().firestore();
+
+  // Unauthenticated access denied
+  await assertFails(unauthDb.collection("communityMessages").get());
+  await assertFails(unauthDb.collection("chatRateLimits").doc(ALICE_UID).get());
+
+  // Posting without updating /chatRateLimits/{uid} in batch is denied
+  await assertFails(
+    aliceDb.collection("communityMessages").doc("no_gate_msg").set({
+      senderId: ALICE_UID,
+      senderName: "Alice Moyo",
+      senderRole: "member",
+      body: "Trying to bypass cooldown gate",
+      clientSentMillis: Date.now(),
+      sentAt: serverTs(),
+    })
+  );
+
+  // First message from Alice via atomic batch succeeds
+  const batch1 = aliceDb.batch();
+  batch1.set(aliceDb.collection("chatRateLimits").doc(ALICE_UID), {
+    userId: ALICE_UID,
+    lastMessageAt: serverTs(),
+  });
+  batch1.set(aliceDb.collection("communityMessages").doc("cmsg_1"), {
+    senderId: ALICE_UID,
+    senderName: "Alice Moyo",
+    senderRole: "member",
+    body: "Hello everyone! Looking for reliable solar installers in Harare.",
+    clientSentMillis: Date.now(),
+    sentAt: serverTs(),
+  });
+  await assertSucceeds(batch1.commit());
+
+  // Second message from Alice immediately (< 3 seconds later) MUST be rejected with PERMISSION_DENIED
+  const burstBatch = aliceDb.batch();
+  burstBatch.update(aliceDb.collection("chatRateLimits").doc(ALICE_UID), {
+    lastMessageAt: serverTs(),
+  });
+  burstBatch.set(aliceDb.collection("communityMessages").doc("cmsg_burst"), {
+    senderId: ALICE_UID,
+    senderName: "Alice Moyo",
+    senderRole: "member",
+    body: "Spamming immediately within 3 seconds!",
+    clientSentMillis: Date.now(),
+    sentAt: serverTs(),
+  });
+  await assertFails(burstBatch.commit());
+
+  // Bob (another user) is NOT blocked by Alice's cooldown and can read & reply immediately
+  await assertSucceeds(bobDb.collection("communityMessages").get());
+  const bobBatch = bobDb.batch();
+  bobBatch.set(bobDb.collection("chatRateLimits").doc(BOB_UID), {
+    userId: BOB_UID,
+    lastMessageAt: serverTs(),
+  });
+  bobBatch.set(bobDb.collection("communityMessages").doc("cmsg_bob_1"), {
+    senderId: BOB_UID,
+    senderName: "Bob Electrical",
+    senderRole: "provider",
+    body: "Hi Alice! Feel free to message me or book directly.",
+    clientSentMillis: Date.now(),
+    sentAt: serverTs(),
+  });
+  await assertSucceeds(bobBatch.commit());
+
+  // Spoofing senderId, reading another user's rate limit, editing, or deleting is denied
+  await assertFails(bobDb.collection("chatRateLimits").doc(ALICE_UID).get());
+  await assertFails(aliceDb.collection("communityMessages").doc("cmsg_1").update({ body: "Tampered" }));
+  await assertFails(aliceDb.collection("communityMessages").doc("cmsg_1").delete());
+
+  // Once Alice's /chatRateLimits/{uid}.lastMessageAt is >= 3 seconds old, her next message succeeds
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await context.firestore().collection("chatRateLimits").doc(ALICE_UID).set({
+      userId: ALICE_UID,
+      lastMessageAt: new Date(Date.now() - 4000),
+    });
+  });
+  const afterCooldownBatch = aliceDb.batch();
+  afterCooldownBatch.update(aliceDb.collection("chatRateLimits").doc(ALICE_UID), {
+    lastMessageAt: serverTs(),
+  });
+  afterCooldownBatch.set(aliceDb.collection("communityMessages").doc("cmsg_alice_2"), {
+    senderId: ALICE_UID,
+    senderName: "Alice Moyo",
+    senderRole: "member",
+    body: "Thanks Bob! Checking your profile now.",
+    clientSentMillis: Date.now(),
+    sentAt: serverTs(),
+  });
+  await assertSucceeds(afterCooldownBatch.commit());
+});

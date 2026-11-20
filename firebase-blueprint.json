@@ -265,6 +265,330 @@
         "createdAt",
         "updatedAt"
       ]
+    },
+    "ProviderSubscription": {
+      "title": "ProviderSubscription",
+      "description": "Provider subscription plan tier, billing cadence, limits, and masked payment instrument.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the subscription owner."
+        },
+        "providerId": {
+          "type": "string",
+          "description": "Document ID of the linked /providerProfiles/{providerId} document."
+        },
+        "businessName": {
+          "type": "string",
+          "description": "Provider business name (2 to 120 characters)."
+        },
+        "planTier": {
+          "type": "string",
+          "enum": ["free_starter", "growth_pro", "business_elite"],
+          "description": "Selected provider subscription tier."
+        },
+        "billingCycle": {
+          "type": "string",
+          "enum": ["monthly", "yearly"],
+          "description": "Monthly or 30%-discounted yearly subscription cadence."
+        },
+        "paymentMethod": {
+          "type": "string",
+          "enum": ["none", "ecocash", "visa", "mastercard", "innbucks", "paypal", "bank_eft"],
+          "description": "Tokenized/masked billing method used for the subscription."
+        },
+        "currency": {
+          "type": "string",
+          "enum": ["USD"],
+          "description": "Billing currency code."
+        },
+        "amountCents": {
+          "type": "integer",
+          "description": "Server-validated plan charge in USD cents."
+        },
+        "monthlyBookingLimit": {
+          "type": "integer",
+          "description": "Monthly booking quota enforced for the plan tier."
+        },
+        "maxCategories": {
+          "type": "integer",
+          "description": "Maximum allowed service categories for the plan tier."
+        },
+        "subscriptionStatus": {
+          "type": "string",
+          "enum": ["active", "pending_confirmation", "cancelled"],
+          "description": "Current subscription lifecycle status."
+        },
+        "autoRenew": {
+          "type": "boolean",
+          "description": "Whether the provider elected automatic renewal."
+        },
+        "maskedInstrument": {
+          "type": "string",
+          "description": "Optional non-sensitive masked payment instrument summary (never stores PAN or CVV)."
+        },
+        "verificationId": {
+          "type": "string",
+          "description": "Required /financialVerifications/{verificationId} document ID for paid subscriptions."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when subscription was first created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when subscription was last updated."
+        }
+      },
+      "required": [
+        "userId",
+        "providerId",
+        "businessName",
+        "planTier",
+        "billingCycle",
+        "paymentMethod",
+        "currency",
+        "amountCents",
+        "monthlyBookingLimit",
+        "maxCategories",
+        "subscriptionStatus",
+        "autoRenew",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "BillingPayment": {
+      "title": "BillingPayment",
+      "description": "Immutable provider billing checkout receipt and invoice record (masked instrument only).",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the payer."
+        },
+        "providerId": {
+          "type": "string",
+          "description": "Linked /providerProfiles/{providerId} document ID."
+        },
+        "planTier": {
+          "type": "string",
+          "enum": ["free_starter", "growth_pro", "business_elite"],
+          "description": "Subscribed plan tier."
+        },
+        "billingCycle": {
+          "type": "string",
+          "enum": ["monthly", "yearly"],
+          "description": "Monthly or yearly billing cycle."
+        },
+        "paymentMethod": {
+          "type": "string",
+          "enum": ["none", "ecocash", "visa", "mastercard", "innbucks", "paypal", "bank_eft"],
+          "description": "Payment rail used for the checkout."
+        },
+        "currency": {
+          "type": "string",
+          "enum": ["USD"],
+          "description": "ISO currency code."
+        },
+        "subtotalCents": {
+          "type": "integer",
+          "description": "Gross subtotal in USD cents prior to annual discount."
+        },
+        "discountCents": {
+          "type": "integer",
+          "description": "30% annual discount in USD cents (0 for monthly)."
+        },
+        "amountCents": {
+          "type": "integer",
+          "description": "Net charged amount in USD cents (subtotalCents - discountCents)."
+        },
+        "maskedInstrument": {
+          "type": "string",
+          "description": "Non-sensitive masked payment summary without PAN/CVV/PIN."
+        },
+        "invoiceNumber": {
+          "type": "string",
+          "description": "Deterministic or generated uppercase invoice reference."
+        },
+        "paymentStatus": {
+          "type": "string",
+          "enum": ["authorized", "pending_gateway", "free_activated"],
+          "description": "Checkout authorization outcome."
+        },
+        "verificationId": {
+          "type": "string",
+          "description": "Required /financialVerifications/{verificationId} audit proof for paid checkouts."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the checkout record was created."
+        }
+      },
+      "required": [
+        "userId",
+        "providerId",
+        "planTier",
+        "billingCycle",
+        "paymentMethod",
+        "currency",
+        "subtotalCents",
+        "discountCents",
+        "amountCents",
+        "maskedInstrument",
+        "invoiceNumber",
+        "paymentStatus",
+        "createdAt"
+      ]
+    },
+    "ProviderSecurityConfig": {
+      "title": "ProviderSecurityConfig",
+      "description": "Owner-only 2FA enrollment metadata storing only SHA-256 fingerprint of encrypted key.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "providerId": { "type": "string" },
+        "twoFactorEnabled": { "type": "boolean" },
+        "twoFactorType": {
+          "type": "string",
+          "enum": ["totp_authenticator", "firebase_mfa_and_totp"]
+        },
+        "secretFingerprint": {
+          "type": "string",
+          "description": "64-char hex SHA-256 hash of the Android-Keystore-sealed TOTP secret."
+        },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "providerId", "twoFactorEnabled", "twoFactorType", "secretFingerprint", "createdAt", "updatedAt"]
+    },
+    "FinancialVerification": {
+      "title": "FinancialVerification",
+      "description": "Immutable append-only 2FA audit receipt combining Firebase Auth step-up re-authentication and TOTP verification.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "providerId": { "type": "string" },
+        "verificationMethod": {
+          "type": "string",
+          "enum": ["firebase_reauth_and_totp", "firebase_native_mfa_and_totp"]
+        },
+        "reauthenticated": { "type": "boolean" },
+        "totpVerified": { "type": "boolean" },
+        "firebaseAuthTimeSeconds": { "type": "integer" },
+        "actionType": {
+          "type": "string",
+          "enum": ["activate_subscription", "switch_plan", "update_payment_method"]
+        },
+        "verifiedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "providerId", "verificationMethod", "reauthenticated", "totpVerified", "firebaseAuthTimeSeconds", "actionType", "verifiedAt"]
+    },
+    "ChatThread": {
+      "title": "ChatThread",
+      "description": "Real-time pre-booking conversation thread between a customer and a service provider keyed deterministically as {providerId}__{customerId}.",
+      "type": "object",
+      "properties": {
+        "customerId": { "type": "string" },
+        "providerId": { "type": "string" },
+        "providerUserId": { "type": "string" },
+        "participantIds": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Two-element list [customerId, providerUserId] for scoped inbox queries."
+        },
+        "customerName": { "type": "string" },
+        "providerBusinessName": { "type": "string" },
+        "providerCategoryName": { "type": "string" },
+        "lastMessageText": { "type": "string" },
+        "lastSenderId": { "type": "string" },
+        "messageCount": { "type": "integer" },
+        "lastCustomerReadAt": { "type": "string", "format": "date-time" },
+        "lastProviderReadAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "customerId",
+        "providerId",
+        "providerUserId",
+        "participantIds",
+        "customerName",
+        "providerBusinessName",
+        "providerCategoryName",
+        "lastMessageText",
+        "lastSenderId",
+        "messageCount",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "Immutable real-time chat message inside /chatThreads/{threadId}/messages/{messageId}.",
+      "type": "object",
+      "properties": {
+        "threadId": { "type": "string" },
+        "providerId": { "type": "string" },
+        "providerUserId": { "type": "string" },
+        "customerId": { "type": "string" },
+        "participantIds": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "body": { "type": "string" },
+        "messageType": {
+          "type": "string",
+          "enum": ["text", "pre_booking_inquiry", "quote_update"]
+        },
+        "clientSentMillis": { "type": "integer" },
+        "sentAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "threadId",
+        "providerId",
+        "providerUserId",
+        "customerId",
+        "participantIds",
+        "senderId",
+        "senderName",
+        "body",
+        "messageType",
+        "clientSentMillis",
+        "sentAt"
+      ]
+    },
+    "CommunityMessage": {
+      "title": "CommunityMessage",
+      "description": "Public real-time message shared across all signed-in Trolley users with 3-second server cooldown.",
+      "type": "object",
+      "properties": {
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "senderRole": {
+          "type": "string",
+          "enum": ["member", "provider"]
+        },
+        "body": { "type": "string" },
+        "clientSentMillis": { "type": "integer" },
+        "sentAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["senderId", "senderName", "senderRole", "body", "clientSentMillis", "sentAt"]
+    },
+    "ChatRateLimit": {
+      "title": "ChatRateLimit",
+      "description": "Per-user server timestamp gate enforcing a mandatory 3-second cooldown between community messages.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "lastMessageAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "lastMessageAt"]
     }
   },
   "firestore": {
@@ -283,6 +607,38 @@
     "/reviews/{reviewId}": {
       "schema": { "$ref": "#/entities/ProviderReview" },
       "description": "Customer ratings and feedback keyed deterministically as {providerId}__{customerId}."
+    },
+    "/providerSubscriptions/{providerId}": {
+      "schema": { "$ref": "#/entities/ProviderSubscription" },
+      "description": "Owner-only provider subscription tier, quotas, and renewal preferences."
+    },
+    "/billingPayments/{paymentId}": {
+      "schema": { "$ref": "#/entities/BillingPayment" },
+      "description": "Append-only immutable billing payment receipts and invoice ledger."
+    },
+    "/providerSecurity/{providerId}": {
+      "schema": { "$ref": "#/entities/ProviderSecurityConfig" },
+      "description": "Owner-only provider 2FA enrollment state without raw secret exposure."
+    },
+    "/financialVerifications/{verificationId}": {
+      "schema": { "$ref": "#/entities/FinancialVerification" },
+      "description": "Immutable Firebase Auth 2FA audit trail required before paid financial transactions."
+    },
+    "/chatThreads/{threadId}": {
+      "schema": { "$ref": "#/entities/ChatThread" },
+      "description": "Real-time pre-booking conversation threads scoped strictly to participants."
+    },
+    "/chatThreads/{threadId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/ChatMessage" },
+      "description": "Immutable participant-isolated chat messages for real-time messaging."
+    },
+    "/communityMessages/{messageId}": {
+      "schema": { "$ref": "#/entities/CommunityMessage" },
+      "description": "Open real-time community chat messages for all signed-in users, protected by 3-second cooldown."
+    },
+    "/chatRateLimits/{userId}": {
+      "schema": { "$ref": "#/entities/ChatRateLimit" },
+      "description": "Server-timestamp-verified per-user chat cooldown lock."
     }
   }
 }

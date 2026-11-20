@@ -24,8 +24,10 @@ import androidx.compose.material.icons.rounded.Explore
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Storefront
+import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
@@ -34,12 +36,14 @@ import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.NavigationRailItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -68,31 +72,45 @@ import com.example.data.firebase.TrolleyRepository
 import com.example.data.firebase.authStateFlow
 import com.example.data.local.AppPreferences
 import com.example.data.model.BookingRequest
+import com.example.data.model.ChatThread
 import com.example.data.model.ProviderProfile
 import com.example.data.model.UiState
+import com.example.data.security.TwoFactorSecretStore
 import com.example.ui.components.BookingRequestSheet
 import com.example.ui.components.ConsentBannerCard
+import com.example.ui.components.DashboardDestinationKey
 import com.example.ui.components.PolicyModalDialog
 import com.example.ui.components.PolicyModalType
+import com.example.ui.components.TrolleyDashboardDrawer
 import com.example.ui.components.TrolleySplashOverlay
 import com.example.ui.components.TrolleyTopBar
+import com.example.ui.screens.AboutAppScreen
+import com.example.ui.screens.AppSettingsScreen
 import com.example.ui.screens.AuthScreen
+import com.example.ui.screens.BillingScreen
 import com.example.ui.screens.BookingsScreen
+import com.example.ui.screens.ChatThreadScreen
 import com.example.ui.screens.DiscoverScreen
 import com.example.ui.screens.HowAndTrustScreen
+import com.example.ui.screens.MessagesInboxScreen
 import com.example.ui.screens.ProviderDetailScreen
 import com.example.ui.screens.ProviderScreen
 import com.example.ui.screens.UserProfileScreen
 import com.example.ui.theme.TrolleyTheme
 import com.example.ui.viewmodel.AccountProviderViewModel
+import com.example.ui.viewmodel.BillingViewModel
 import com.example.ui.viewmodel.BookingsViewModel
+import com.example.ui.viewmodel.ChatThreadViewModel
 import com.example.ui.viewmodel.DiscoveryViewModel
+import com.example.ui.viewmodel.MessagesInboxViewModel
 import com.example.ui.viewmodel.NearbyProvidersSnapshot
 import com.example.ui.viewmodel.NearbyProvidersViewModel
 import com.example.ui.viewmodel.ProviderDetailViewModel
 import com.google.firebase.Firebase
+import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.auth
 import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -112,6 +130,28 @@ data object MyBusinessRoute
 
 @Serializable
 data object ProfileRoute
+
+@Serializable
+data object BillingRoute
+
+@Serializable
+data object AppSettingsRoute
+
+@Serializable
+data object AboutAppRoute
+
+@Serializable
+data object MessagesInboxRoute
+
+@Serializable
+data class ChatThreadRoute(
+    val providerId: String,
+    val providerUserId: String,
+    val providerBusinessName: String,
+    val providerCategoryName: String,
+    val customerId: String,
+    val customerName: String,
+)
 
 private data class NavTabItem<T : Any>(
     val route: T,
@@ -180,24 +220,119 @@ fun TrolleyAppNavigation() {
         runCatching { context.startActivity(intent) }
     }
 
+    val inboxThreadsUiState: UiState<List<ChatThread>>? = currentUser?.let { user ->
+        key("global_inbox_${user.uid}") {
+            val globalInboxViewModel: MessagesInboxViewModel = viewModel(
+                key = "inbox_${user.uid}",
+                factory = viewModelFactory {
+                    initializer {
+                        val appInstance = checkNotNull(this[APPLICATION_KEY])
+                        val databaseId = appInstance.getString(R.string.firestore_database_id)
+                        val db = FirebaseFirestore.getInstance(databaseId)
+                        MessagesInboxViewModel(
+                            repository = TrolleyRepository(db),
+                            currentUserId = user.uid,
+                        )
+                    }
+                },
+            )
+            val threadsState by globalInboxViewModel.threadsState.collectAsStateWithLifecycle()
+            threadsState
+        }
+    }
+    val unreadMessagesCount = remember(inboxThreadsUiState, currentUser?.uid) {
+        val uid = currentUser?.uid ?: return@remember 0
+        (inboxThreadsUiState as? UiState.Success)?.data?.count { it.hasUnreadFor(uid) } ?: 0
+    }
+
+    fun openPreBookingChat(provider: ProviderProfile, user: FirebaseUser?) {
+        if (user == null) {
+            navigateToTab(ProfileRoute)
+            return
+        }
+        if (provider.userId == user.uid) {
+            navController.navigate(MessagesInboxRoute) {
+                launchSingleTop = true
+            }
+            return
+        }
+        navController.navigate(
+            ChatThreadRoute(
+                providerId = provider.id,
+                providerUserId = provider.userId,
+                providerBusinessName = provider.businessName,
+                providerCategoryName = provider.categoryName,
+                customerId = user.uid,
+                customerName = user.displayName.orEmpty().ifBlank { "Trolley Member" },
+            )
+        ) {
+            launchSingleTop = true
+        }
+    }
+
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+    val drawerScope = rememberCoroutineScope()
+
+    val activeDrawerKey = when {
+        currentDestination?.hasRoute(MessagesInboxRoute::class) == true -> DashboardDestinationKey.MESSAGES_INBOX
+        currentDestination?.hasRoute(AppSettingsRoute::class) == true -> DashboardDestinationKey.APP_SETTINGS
+        currentDestination?.hasRoute(BillingRoute::class) == true -> DashboardDestinationKey.BILLING_PLANS
+        currentDestination?.hasRoute(AboutAppRoute::class) == true -> DashboardDestinationKey.ABOUT_APP
+        currentDestination?.hasRoute(ProfileRoute::class) == true -> DashboardDestinationKey.ACCOUNT_SETTINGS
+        currentDestination?.hasRoute(MyBusinessRoute::class) == true -> DashboardDestinationKey.PROFILE_MANAGEMENT
+        else -> DashboardDestinationKey.NONE
+    }
+
+    fun navigateFromDrawer(route: Any) {
+        drawerScope.launch { drawerState.close() }
+        navController.navigate(route) {
+            launchSingleTop = true
+        }
+    }
+
     TrolleyTheme(darkTheme = discoveryState.preferences.darkTheme) {
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
             val useRail = maxWidth >= 600.dp
 
-            Scaffold(
-                containerColor = MaterialTheme.colorScheme.background,
-                topBar = {
-                    TrolleyTopBar(
-                        darkTheme = discoveryState.preferences.darkTheme,
-                        isSignedIn = currentUser != null,
-                        onToggleTheme = {
-                            discoveryViewModel.setDarkTheme(!discoveryState.preferences.darkTheme)
+            ModalNavigationDrawer(
+                drawerState = drawerState,
+                drawerContent = {
+                    TrolleyDashboardDrawer(
+                        currentUser = currentUser,
+                        activeKey = activeDrawerKey,
+                        unreadMessagesCount = unreadMessagesCount,
+                        onSelectAppSettings = { navigateFromDrawer(AppSettingsRoute) },
+                        onSelectUserAccountSettings = {
+                            drawerScope.launch { drawerState.close() }
+                            navigateToTab(ProfileRoute)
                         },
-                        onOpenAccountOrBusiness = { navigateToTab(MyBusinessRoute) },
-                        onOpenProfile = { navigateToTab(ProfileRoute) },
+                        onSelectProfileManagement = {
+                            drawerScope.launch { drawerState.close() }
+                            navigateToTab(MyBusinessRoute)
+                        },
+                        onSelectMessagesInbox = { navigateFromDrawer(MessagesInboxRoute) },
+                        onSelectBillingPlans = { navigateFromDrawer(BillingRoute) },
+                        onSelectAboutApp = { navigateFromDrawer(AboutAppRoute) },
                     )
                 },
-                bottomBar = {
+            ) {
+                Scaffold(
+                    containerColor = MaterialTheme.colorScheme.background,
+                    topBar = {
+                        TrolleyTopBar(
+                            isSignedIn = currentUser != null,
+                            unreadMessagesCount = unreadMessagesCount,
+                            onOpenMenu = { drawerScope.launch { drawerState.open() } },
+                            onOpenMessages = {
+                                navController.navigate(MessagesInboxRoute) {
+                                    launchSingleTop = true
+                                }
+                            },
+                            onOpenAccountOrBusiness = { navigateToTab(MyBusinessRoute) },
+                            onOpenProfile = { navigateToTab(ProfileRoute) },
+                        )
+                    },
+                    bottomBar = {
                     if (!useRail) {
                         NavigationBar(
                             containerColor = MaterialTheme.colorScheme.surface,
@@ -346,6 +481,9 @@ fun TrolleyAppNavigation() {
                                             navController.navigate(ProviderDetailRoute(provider.id))
                                         }
                                     },
+                                    onMessageProvider = { provider ->
+                                        openPreBookingChat(provider, user)
+                                    },
                                     onContactClick = ::openContactEmail,
                                     contentPadding = innerPadding,
                                 )
@@ -386,6 +524,14 @@ fun TrolleyAppNavigation() {
                                             onBackClick = { navController.popBackStack() },
                                             onRequestBooking = { provider ->
                                                 activeBookingSheetTarget = BookingSheetState(initialProvider = provider)
+                                            },
+                                            onMessageProvider = { provider ->
+                                                openPreBookingChat(provider, user)
+                                            },
+                                            onOpenMessagesInbox = {
+                                                navController.navigate(MessagesInboxRoute) {
+                                                    launchSingleTop = true
+                                                }
                                             },
                                             contentPadding = innerPadding,
                                         )
@@ -430,6 +576,20 @@ fun TrolleyAppNavigation() {
                                             },
                                             onViewProviderProfile = { providerId ->
                                                 navController.navigate(ProviderDetailRoute(providerId))
+                                            },
+                                            onMessageParticipant = { booking ->
+                                                navController.navigate(
+                                                    ChatThreadRoute(
+                                                        providerId = booking.providerId,
+                                                        providerUserId = booking.providerUserId,
+                                                        providerBusinessName = booking.providerBusinessName,
+                                                        providerCategoryName = booking.categoryName,
+                                                        customerId = booking.customerId,
+                                                        customerName = booking.customerName,
+                                                    )
+                                                ) {
+                                                    launchSingleTop = true
+                                                }
                                             },
                                             onBrowseProvidersClick = { navigateToTab(DiscoverRoute) },
                                             contentPadding = innerPadding,
@@ -481,6 +641,16 @@ fun TrolleyAppNavigation() {
                                             userDisplayName = user.displayName.orEmpty(),
                                             userEmail = user.email,
                                             onSignedOut = {},
+                                            onProviderDraftCreated = {
+                                                navController.navigate(BillingRoute) {
+                                                    launchSingleTop = true
+                                                }
+                                            },
+                                            onOpenBilling = {
+                                                navController.navigate(BillingRoute) {
+                                                    launchSingleTop = true
+                                                }
+                                            },
                                             contentPadding = innerPadding,
                                         )
                                     }
@@ -526,6 +696,177 @@ fun TrolleyAppNavigation() {
                                     }
                                 }
                             }
+
+                            composable<BillingRoute> {
+                                val user = currentUser
+                                if (user == null) {
+                                    AuthScreen(
+                                        onAuthSuccess = {},
+                                        onOpenPrivacy = { activePolicyModal = PolicyModalType.PRIVACY },
+                                        onOpenTerms = { activePolicyModal = PolicyModalType.TERMS },
+                                        onContactClick = ::openContactEmail,
+                                        contentPadding = innerPadding,
+                                    )
+                                } else {
+                                    key("billing_${user.uid}") {
+                                        val billingViewModel: BillingViewModel = viewModel(
+                                            key = "billing_${user.uid}",
+                                            factory = viewModelFactory {
+                                                initializer {
+                                                    val appInstance = checkNotNull(this[APPLICATION_KEY])
+                                                    val databaseId = appInstance.getString(R.string.firestore_database_id)
+                                                    val db = FirebaseFirestore.getInstance(databaseId)
+                                                    BillingViewModel(
+                                                        repository = TrolleyRepository(db),
+                                                        secretStore = TwoFactorSecretStore(appInstance),
+                                                        currentUserId = user.uid,
+                                                        userEmail = user.email,
+                                                    )
+                                                }
+                                            },
+                                        )
+                                        BillingScreen(
+                                            viewModel = billingViewModel,
+                                            onCreateProviderFirst = { navigateToTab(MyBusinessRoute) },
+                                            onBack = { navController.popBackStack() },
+                                            contentPadding = innerPadding,
+                                        )
+                                    }
+                                }
+                            }
+
+                            composable<AppSettingsRoute> {
+                                AppSettingsScreen(
+                                    preferences = discoveryState.preferences,
+                                    isSignedIn = currentUser != null,
+                                    onToggleDarkTheme = discoveryViewModel::setDarkTheme,
+                                    onChangeDiscoveryCountry = discoveryViewModel::setDiscoveryCountry,
+                                    onResetConsent = discoveryViewModel::clearConsentChoice,
+                                    onOpenAccountSettings = { navigateToTab(ProfileRoute) },
+                                    onOpenBilling = { navController.navigate(BillingRoute) },
+                                    onBack = { navController.popBackStack() },
+                                    contentPadding = innerPadding,
+                                )
+                            }
+
+                            composable<AboutAppRoute> {
+                                AboutAppScreen(
+                                    onOpenPrivacy = { activePolicyModal = PolicyModalType.PRIVACY },
+                                    onOpenTerms = { activePolicyModal = PolicyModalType.TERMS },
+                                    onContactClick = ::openContactEmail,
+                                    onBack = { navController.popBackStack() },
+                                    contentPadding = innerPadding,
+                                )
+                            }
+
+                            composable<MessagesInboxRoute> {
+                                val user = currentUser
+                                if (user == null) {
+                                    AuthScreen(
+                                        onAuthSuccess = {},
+                                        onOpenPrivacy = { activePolicyModal = PolicyModalType.PRIVACY },
+                                        onOpenTerms = { activePolicyModal = PolicyModalType.TERMS },
+                                        onContactClick = ::openContactEmail,
+                                        contentPadding = innerPadding,
+                                    )
+                                } else {
+                                    key("inbox_${user.uid}") {
+                                        val inboxViewModel: MessagesInboxViewModel = viewModel(
+                                            key = "inbox_${user.uid}",
+                                            factory = viewModelFactory {
+                                                initializer {
+                                                    val appInstance = checkNotNull(this[APPLICATION_KEY])
+                                                    val databaseId = appInstance.getString(R.string.firestore_database_id)
+                                                    val db = FirebaseFirestore.getInstance(databaseId)
+                                                    MessagesInboxViewModel(
+                                                        repository = TrolleyRepository(db),
+                                                        currentUserId = user.uid,
+                                                    )
+                                                }
+                                            },
+                                        )
+                                        MessagesInboxScreen(
+                                            viewModel = inboxViewModel,
+                                            currentUserId = user.uid,
+                                            onOpenThread = { thread ->
+                                                navController.navigate(
+                                                    ChatThreadRoute(
+                                                        providerId = thread.providerId,
+                                                        providerUserId = thread.providerUserId,
+                                                        providerBusinessName = thread.providerBusinessName,
+                                                        providerCategoryName = thread.providerCategoryName,
+                                                        customerId = thread.customerId,
+                                                        customerName = thread.customerName,
+                                                    )
+                                                ) {
+                                                    launchSingleTop = true
+                                                }
+                                            },
+                                            onBrowseProvidersClick = { navigateToTab(DiscoverRoute) },
+                                            onBack = { navController.popBackStack() },
+                                            contentPadding = innerPadding,
+                                        )
+                                    }
+                                }
+                            }
+
+                            composable<ChatThreadRoute> { entry ->
+                                val route = entry.toRoute<ChatThreadRoute>()
+                                val user = currentUser
+                                if (user == null) {
+                                    AuthScreen(
+                                        onAuthSuccess = {},
+                                        onOpenPrivacy = { activePolicyModal = PolicyModalType.PRIVACY },
+                                        onOpenTerms = { activePolicyModal = PolicyModalType.TERMS },
+                                        onContactClick = ::openContactEmail,
+                                        contentPadding = innerPadding,
+                                    )
+                                } else {
+                                    key("chat_${user.uid}_${route.providerId}_${route.customerId}") {
+                                        val chatViewModel: ChatThreadViewModel = viewModel(
+                                            key = "chat_${user.uid}_${route.providerId}_${route.customerId}",
+                                            factory = viewModelFactory {
+                                                initializer {
+                                                    val appInstance = checkNotNull(this[APPLICATION_KEY])
+                                                    val databaseId = appInstance.getString(R.string.firestore_database_id)
+                                                    val db = FirebaseFirestore.getInstance(databaseId)
+                                                    ChatThreadViewModel(
+                                                        repository = TrolleyRepository(db),
+                                                        providerId = route.providerId,
+                                                        providerUserId = route.providerUserId,
+                                                        providerBusinessName = route.providerBusinessName,
+                                                        providerCategoryName = route.providerCategoryName,
+                                                        customerId = route.customerId,
+                                                        customerName = route.customerName,
+                                                        currentUserId = user.uid,
+                                                        currentUserDisplayName = user.displayName.orEmpty().ifBlank { "Trolley Member" },
+                                                    )
+                                                }
+                                            },
+                                        )
+                                        ChatThreadScreen(
+                                            viewModel = chatViewModel,
+                                            currentUserId = user.uid,
+                                            partnerFallbackName = if (user.uid == route.customerId) {
+                                                route.providerBusinessName
+                                            } else {
+                                                route.customerName
+                                            },
+                                            categoryFallbackName = route.providerCategoryName,
+                                            onBack = { navController.popBackStack() },
+                                            onRequestBooking = { provider ->
+                                                activeBookingSheetTarget = BookingSheetState(initialProvider = provider)
+                                            },
+                                            onViewProviderProfile = { providerId ->
+                                                navController.navigate(ProviderDetailRoute(providerId)) {
+                                                    launchSingleTop = true
+                                                }
+                                            },
+                                            contentPadding = innerPadding,
+                                        )
+                                    }
+                                }
+                            }
                         }
 
                         if (discoveryState.preferences.consentChoice == null) {
@@ -544,6 +885,7 @@ fun TrolleyAppNavigation() {
                         }
                     }
                 }
+            }
             }
 
             val signedInUser = currentUser

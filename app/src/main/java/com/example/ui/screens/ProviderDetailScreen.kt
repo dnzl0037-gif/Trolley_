@@ -24,11 +24,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.CalendarMonth
+import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Directions
 import androidx.compose.material.icons.rounded.LocationOn
-import androidx.compose.material.icons.rounded.MailOutline
 import androidx.compose.material.icons.rounded.Storefront
 import androidx.compose.material.icons.rounded.VerifiedUser
 import androidx.compose.material3.Button
@@ -81,6 +81,8 @@ fun ProviderDetailScreen(
     currentUserId: String,
     onBackClick: () -> Unit,
     onRequestBooking: (ProviderProfile) -> Unit,
+    onMessageProvider: (ProviderProfile) -> Unit = {},
+    onOpenMessagesInbox: () -> Unit = {},
     contentPadding: PaddingValues = PaddingValues(0.dp),
 ) {
     val context = LocalContext.current
@@ -399,65 +401,67 @@ fun ProviderDetailScreen(
                                         Text(stringResource(R.string.map_request_booking))
                                     }
 
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    val chatInteraction = remember { MutableInteractionSource() }
+                                    OutlinedButton(
+                                        onClick = {
+                                            if (data.isOwnProfile) {
+                                                onOpenMessagesInbox()
+                                            } else {
+                                                onMessageProvider(provider)
+                                            }
+                                        },
+                                        interactionSource = chatInteraction,
+                                        shape = RoundedCornerShape(10.dp),
+                                        border = BorderStroke(1.dp, TrolleyTheme.colors.hairline),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .trolleySpringPress(chatInteraction)
+                                            .minimumInteractiveComponentSize()
+                                            .testTag("provider_detail_chat_button"),
                                     ) {
-                                        val dirInteraction = remember { MutableInteractionSource() }
-                                        OutlinedButton(
-                                            onClick = {
-                                                val coords = GeographyCatalog.approximateCoordinates(provider.countryCode, provider.city)
-                                                val lat = provider.latitude ?: coords.first
-                                                val lon = provider.longitude ?: coords.second
-                                                val label = Uri.encode("${provider.businessName}, ${provider.formattedLocation}")
-                                                val geoUri = Uri.parse("geo:$lat,$lon?q=$lat,$lon($label)")
-                                                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, geoUri)) }
-                                            },
-                                            interactionSource = dirInteraction,
-                                            shape = RoundedCornerShape(10.dp),
-                                            border = BorderStroke(1.dp, TrolleyTheme.colors.hairline),
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .trolleySpringPress(dirInteraction)
-                                                .minimumInteractiveComponentSize(),
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Rounded.Directions,
-                                                contentDescription = null,
-                                                modifier = Modifier.size(16.dp),
-                                            )
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Text(stringResource(R.string.map_open_directions))
-                                        }
-
-                                        val contactInteraction = remember { MutableInteractionSource() }
-                                        OutlinedButton(
-                                            onClick = {
-                                                val intent = Intent(Intent.ACTION_SENDTO).apply {
-                                                    setData(Uri.parse("mailto:gmrboy2009@gmail.com"))
-                                                    putExtra(
-                                                        Intent.EXTRA_SUBJECT,
-                                                        "Trolley Enquiry: ${provider.businessName} (${provider.city})",
-                                                    )
+                                        Icon(
+                                            imageVector = Icons.Rounded.ChatBubbleOutline,
+                                            contentDescription = null,
+                                            tint = TrolleyTheme.colors.limeAccent,
+                                            modifier = Modifier.size(16.dp),
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = stringResource(
+                                                if (data.isOwnProfile) {
+                                                    R.string.chat_inbox_title
+                                                } else {
+                                                    R.string.chat_before_booking_btn
                                                 }
-                                                runCatching { context.startActivity(intent) }
-                                            },
-                                            interactionSource = contactInteraction,
-                                            shape = RoundedCornerShape(10.dp),
-                                            border = BorderStroke(1.dp, TrolleyTheme.colors.hairline),
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .trolleySpringPress(contactInteraction)
-                                                .minimumInteractiveComponentSize(),
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Rounded.MailOutline,
-                                                contentDescription = null,
-                                                modifier = Modifier.size(16.dp),
-                                            )
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Text(stringResource(R.string.map_contact_pro))
-                                        }
+                                            ),
+                                        )
+                                    }
+
+                                    val dirInteraction = remember { MutableInteractionSource() }
+                                    OutlinedButton(
+                                        onClick = {
+                                            val coords = GeographyCatalog.approximateCoordinates(provider.countryCode, provider.city)
+                                            val lat = provider.latitude ?: coords.first
+                                            val lon = provider.longitude ?: coords.second
+                                            val label = Uri.encode("${provider.businessName}, ${provider.formattedLocation}")
+                                            val geoUri = Uri.parse("geo:$lat,$lon?q=$lat,$lon($label)")
+                                            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, geoUri)) }
+                                        },
+                                        interactionSource = dirInteraction,
+                                        shape = RoundedCornerShape(10.dp),
+                                        border = BorderStroke(1.dp, TrolleyTheme.colors.hairline),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .trolleySpringPress(dirInteraction)
+                                            .minimumInteractiveComponentSize(),
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Directions,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp),
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(stringResource(R.string.map_open_directions))
                                     }
                                 }
                             }
@@ -468,20 +472,39 @@ fun ProviderDetailScreen(
                             ProviderRatingOverviewCard(summary = data.summary)
                         }
 
-                        // Submit or Update Customer Review Card
-                        item(key = "leave_review_form") {
-                            Surface(
-                                shape = RoundedCornerShape(16.dp),
-                                color = MaterialTheme.colorScheme.surface,
-                                border = BorderStroke(1.dp, TrolleyTheme.colors.hairline),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("leave_review_card"),
-                            ) {
-                                Column(
-                                    modifier = Modifier.padding(18.dp),
-                                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                        // Submit or Update Customer Review Card (blocked on own provider profile)
+                        if (data.isOwnProfile) {
+                            item(key = "own_profile_review_notice") {
+                                Surface(
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant,
+                                    border = BorderStroke(1.dp, TrolleyTheme.colors.hairline),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("own_profile_review_blocked_notice"),
                                 ) {
+                                    Text(
+                                        text = "You are previewing your own provider listing. Customer ratings can only be submitted by other signed-in customers.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = TrolleyTheme.colors.mutedInk,
+                                        modifier = Modifier.padding(16.dp),
+                                    )
+                                }
+                            }
+                        } else {
+                            item(key = "leave_review_form") {
+                                Surface(
+                                    shape = RoundedCornerShape(16.dp),
+                                    color = MaterialTheme.colorScheme.surface,
+                                    border = BorderStroke(1.dp, TrolleyTheme.colors.hairline),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("leave_review_card"),
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(18.dp),
+                                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                                    ) {
                                     Text(
                                         text = if (existingReview != null) "YOUR SUBMITTED REVIEW" else "RATE THIS PROVIDER",
                                         style = MaterialTheme.typography.labelSmall,
@@ -619,6 +642,7 @@ fun ProviderDetailScreen(
                                     }
                                 }
                             }
+                        }
                         }
 
                         // Reviews List Header

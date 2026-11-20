@@ -43,4 +43,8 @@ class AppPreferences(private val context: Context) {
     suspend fun setConsentChoice(choice: String) {
         context.dataStore.edit { it[Keys.CONSENT_CHOICE] = choice }
     }
+
+    suspend fun clearConsentChoice() {
+        context.dataStore.edit { it.remove(Keys.CONSENT_CHOICE) }
+    }
 }

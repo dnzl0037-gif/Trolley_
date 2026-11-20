@@ -2,7 +2,8 @@
   "firestore": [
     {
       "database": "ai-studio-android-trolley-823a17af-b15c-4e07-a20d-458658f77600",
-      "rules": "firestore.rules"
+      "rules": "firestore.rules",
+      "indexes": "firestore.indexes.json"
     }
   ],
   "emulators": {

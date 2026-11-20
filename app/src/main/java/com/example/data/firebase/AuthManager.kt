@@ -25,8 +25,10 @@ import com.google.firebase.Firebase
 import com.google.firebase.FirebaseNetworkException
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseAuthException
+import com.google.firebase.auth.FirebaseAuthMultiFactorException
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.auth.MultiFactorResolver
 import com.google.firebase.auth.auth
 import com.google.firebase.auth.userProfileChangeRequest
 import kotlinx.coroutines.CancellationException
@@ -64,17 +66,53 @@ sealed interface GoogleSignInResult {
     data class Error(val message: String) : GoogleSignInResult
 }
 
+sealed interface FinancialStepUpResult {
+    data class Verified(
+        val userId: String,
+        val firebaseAuthTimeSeconds: Long,
+        val enrolledFirebaseFactorsCount: Int,
+    ) : FinancialStepUpResult
+
+    data class MultiFactorChallengeRequired(
+        val resolver: MultiFactorResolver,
+    ) : FinancialStepUpResult
+
+    data object Cancelled : FinancialStepUpResult
+    data object Timeout : FinancialStepUpResult
+    data class Error(val message: String) : FinancialStepUpResult
+}
+
 object AuthManager {
 
     private const val TAG = "Auth"
     const val LOGIN_TIMEOUT_MS = 45_000L
     const val AUTO_LOGIN_TIMEOUT_MS = 12_000L
     const val VERIFICATION_WINDOW_MS = 10 * 60 * 1000L // 10 minutes
+    const val FINANCIAL_REAUTH_WINDOW_MS = 5 * 60 * 1000L // 5 minutes for financial 2FA step-up
     const val MAX_FAILED_ATTEMPTS = 5
     const val COOLDOWN_SECONDS = 60
 
     private val _profileRevision = MutableStateFlow(0L)
     val profileRevision: StateFlow<Long> = _profileRevision.asStateFlow()
+
+    @Volatile
+    private var lastVerifiedFinancialReauthMs: Long = 0L
+
+    fun normalizeEpochSeconds(rawTimestamp: Long): Long {
+        if (rawTimestamp <= 0L) return 0L
+        return if (rawTimestamp >= 10_000_000_000L) rawTimestamp / 1000L else rawTimestamp
+    }
+
+    fun remainingFinancialReauthMillis(nowMillis: Long = System.currentTimeMillis()): Long {
+        if (Firebase.auth.currentUser == null || lastVerifiedFinancialReauthMs <= 0L) return 0L
+        val elapsed = (nowMillis - lastVerifiedFinancialReauthMs).coerceAtLeast(0L)
+        return (FINANCIAL_REAUTH_WINDOW_MS - elapsed).coerceAtLeast(0L)
+    }
+
+    fun enrolledFirebaseMfaCount(): Int {
+        val user = Firebase.auth.currentUser ?: return 0
+        return runCatching { user.multiFactor.enrolledFactors.size }.getOrDefault(0)
+    }
 
     tailrec fun Context.findActivity(): Activity? = when (this) {
         is Activity -> this
@@ -269,6 +307,7 @@ object AuthManager {
                         )
                     }
 
+                    lastVerifiedFinancialReauthMs = System.currentTimeMillis()
                     GoogleSignInResult.Success(
                         isNewUser = isNew,
                         userId = firebaseUser.uid,
@@ -296,7 +335,78 @@ object AuthManager {
         }
     }
 
+    /**
+     * Step 1 of Provider 2FA for Financial Transactions:
+     * Performs a live Google Credential Manager challenge and executes
+     * FirebaseUser.reauthenticate(GoogleAuthProvider credential) followed by a forced
+     * ID-token refresh to capture a fresh cryptographic Firebase Auth auth_time claim.
+     */
+    suspend fun reauthenticateForFinancialAction(context: Context): FinancialStepUpResult {
+        val currentUser = Firebase.auth.currentUser
+            ?: return FinancialStepUpResult.Error("Sign in with Google first before authorizing financial changes.")
+        val clientId = runCatching { context.getString(R.string.default_web_client_id) }.getOrNull()
+        if (!isValidWebClientId(clientId)) {
+            return FinancialStepUpResult.Error("Google Sign-In Web Client ID configuration is missing.")
+        }
+        val activity = context.findActivity()
+            ?: return FinancialStepUpResult.Error("Unable to launch Firebase re-authentication from this context.")
+
+        val credentialManager = CredentialManager.create(activity)
+        val explicitOption = GetSignInWithGoogleOption.Builder(serverClientId = clientId!!).build()
+        val request = GetCredentialRequest.Builder()
+            .addCredentialOption(explicitOption)
+            .build()
+
+        return try {
+            withTimeout(LOGIN_TIMEOUT_MS) {
+                val credential = credentialManager.getCredential(activity, request).credential
+                if (credential is CustomCredential && credential.type == TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
+                    val googleCred = GoogleIdTokenCredential.createFrom(credential.data)
+                    val firebaseCred = GoogleAuthProvider.getCredential(googleCred.idToken, null)
+                    currentUser.reauthenticate(firebaseCred).await()
+                    val tokenResult = currentUser.getIdToken(true).await()
+                    val authTimeSec = normalizeEpochSeconds(tokenResult.authTimestamp)
+                        .takeIf { it > 0L }
+                        ?: (System.currentTimeMillis() / 1000L)
+                    lastVerifiedFinancialReauthMs = System.currentTimeMillis()
+                    val factorCount = runCatching { currentUser.multiFactor.enrolledFactors.size }.getOrDefault(0)
+                    FinancialStepUpResult.Verified(
+                        userId = currentUser.uid,
+                        firebaseAuthTimeSeconds = authTimeSec,
+                        enrolledFirebaseFactorsCount = factorCount,
+                    )
+                } else {
+                    FinancialStepUpResult.Error("Unexpected credential returned during Firebase re-authentication.")
+                }
+            }
+        } catch (mfaEx: FirebaseAuthMultiFactorException) {
+            Log.i(TAG, "Firebase native MultiFactor challenge required during re-auth")
+            FinancialStepUpResult.MultiFactorChallengeRequired(mfaEx.resolver)
+        } catch (e: TimeoutCancellationException) {
+            Log.w(TAG, "Firebase re-authentication timed out after ${LOGIN_TIMEOUT_MS}ms", e)
+            FinancialStepUpResult.Timeout
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            when (val mapped = mapGoogleCredentialException(e)) {
+                is GoogleSignInResult.Cancelled -> FinancialStepUpResult.Cancelled
+                is GoogleSignInResult.Timeout -> FinancialStepUpResult.Timeout
+                is GoogleSignInResult.Error -> FinancialStepUpResult.Error(mapped.message)
+                is GoogleSignInResult.Success -> FinancialStepUpResult.Error("Unexpected sign-in state.")
+            }
+        }
+    }
+
+    suspend fun currentFirebaseAuthTimeSeconds(): Long? {
+        val user = Firebase.auth.currentUser ?: return null
+        val refreshed = runCatching { user.getIdToken(false).await() }.getOrNull()
+        val tokenSec = normalizeEpochSeconds(refreshed?.authTimestamp ?: 0L)
+        if (tokenSec > 0L) return tokenSec
+        return normalizeEpochSeconds(user.metadata?.lastSignInTimestamp ?: 0L).takeIf { it > 0L }
+    }
+
     suspend fun signOut(context: Context) {
+        lastVerifiedFinancialReauthMs = 0L
         val credentialManager = CredentialManager.create(context.applicationContext)
         withContext(NonCancellable) {
             try {

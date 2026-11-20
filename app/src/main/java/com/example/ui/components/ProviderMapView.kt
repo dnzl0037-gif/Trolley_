@@ -38,11 +38,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.CalendarMonth
+import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Directions
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.LocationOn
-import androidx.compose.material.icons.rounded.MailOutline
 import androidx.compose.material.icons.rounded.MyLocation
 import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.Storefront
@@ -118,6 +118,7 @@ fun ProviderMapView(
     onEditOwnListingClick: () -> Unit,
     onRequestBooking: (ProviderProfile) -> Unit = {},
     onViewProviderProfile: (ProviderProfile) -> Unit = {},
+    onMessageProvider: (ProviderProfile) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -627,14 +628,7 @@ fun ProviderMapView(
                             if (marker.isOwnPreview) {
                                 onEditOwnListingClick()
                             } else {
-                                val intent = Intent(Intent.ACTION_SENDTO).apply {
-                                    data = Uri.parse("mailto:gmrboy2009@gmail.com")
-                                    putExtra(
-                                        Intent.EXTRA_SUBJECT,
-                                        "Trolley Enquiry: ${marker.profile.businessName} (${marker.profile.city})",
-                                    )
-                                }
-                                runCatching { context.startActivity(intent) }
+                                onMessageProvider(marker.profile)
                             }
                         },
                     )
@@ -945,15 +939,19 @@ private fun ProviderMarkerProfileCard(
                         .testTag("map_card_primary_action_button"),
                 ) {
                     Icon(
-                        imageVector = if (marker.isOwnPreview) Icons.Rounded.Edit else Icons.Rounded.MailOutline,
+                        imageVector = if (marker.isOwnPreview) Icons.Rounded.Edit else Icons.Rounded.ChatBubbleOutline,
                         contentDescription = null,
                         modifier = Modifier.size(16.dp),
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = stringResource(
-                            if (marker.isOwnPreview) R.string.map_edit_listing else R.string.map_contact_pro
-                        ),
+                        text = if (marker.isOwnPreview) {
+                            stringResource(R.string.map_edit_listing)
+                        } else {
+                            "Message"
+                        },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }

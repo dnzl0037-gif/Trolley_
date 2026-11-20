@@ -130,4 +130,50 @@
     <string name="review_delete_btn">Delete review</string>
     <string name="review_empty_title">No customer reviews yet</string>
     <string name="review_empty_body">Be the first customer to rate this service professional after working with them.</string>
+
+    <string name="open_dashboard_menu_desc">Open dashboard side menu</string>
+    <string name="drawer_header_title">Dashboard Menu</string>
+    <string name="drawer_app_settings">App Settings</string>
+    <string name="drawer_account_settings">User Account Settings</string>
+    <string name="drawer_profile_management">Profile Management</string>
+    <string name="drawer_billing_plans">Billing &amp; Plans</string>
+    <string name="drawer_about_app">About Trolley</string>
+
+    <string name="settings_eyebrow">PREFERENCES &amp; PRIVACY</string>
+    <string name="settings_title">App Settings</string>
+    <string name="settings_dark_mode">Dark Mode</string>
+    <string name="settings_dark_mode_desc">Switch between warm daylight and low-glare obsidian themes across Trolley.</string>
+
+    <string name="about_eyebrow">PLATFORM &amp; SECURITY</string>
+    <string name="about_title">About Trolley</string>
+    <string name="about_version_label">Version 1.0.0 · Verified Android Build</string>
+
+    <string name="billing_eyebrow">PROVIDER SUBSCRIPTIONS</string>
+    <string name="billing_title">Plans &amp; Billing</string>
+    <string name="billing_intro">Start with 4 free limited features or unlock unlimited bookings and featured visibility. Save 30% with yearly billing.</string>
+    <string name="billing_monthly_tab">Monthly</string>
+    <string name="billing_yearly_tab">Yearly · Save 30%</string>
+    <string name="billing_confirm_cta">Confirm &amp; activate plan</string>
+
+    <string name="twofa_eyebrow">DUAL-FACTOR FINANCIAL GUARD</string>
+    <string name="twofa_title">Two-Factor Verification Required</string>
+    <string name="twofa_subtitle">Paid transactions require live Firebase Auth step-up verification plus a 6-digit Authenticator code.</string>
+    <string name="twofa_step1_title">Factor 1 · Firebase Auth Verification</string>
+    <string name="twofa_step2_title">Factor 2 · 6-Digit Authenticator Code (TOTP)</string>
+    <string name="twofa_verify_google_btn">Verify with Firebase Auth</string>
+    <string name="twofa_authorize_pay_btn">Verify 2FA &amp; Complete Payment</string>
+    <string name="twofa_enroll_authorize_btn">Enable 2FA &amp; Complete Payment</string>
+    <string name="twofa_copy_key_btn">Copy Setup Key</string>
+    <string name="twofa_open_auth_app_btn">Open Authenticator App</string>
+
+    <string name="drawer_messages_inbox">Pre-Booking Messages</string>
+    <string name="chat_inbox_eyebrow">LIVE CONVERSATIONS</string>
+    <string name="chat_inbox_title">Messages</string>
+    <string name="chat_inbox_intro">Chat directly with service professionals before booking to align on scope, pricing, and availability.</string>
+    <string name="chat_before_booking_btn">Chat before booking</string>
+    <string name="chat_trust_badge">Direct Pre-Booking Chat · Protected by Trolley Trust</string>
+    <string name="chat_book_now_cta">Book Now</string>
+    <string name="chat_input_placeholder">Ask about scope, pricing, or availability…</string>
+    <string name="chat_empty_thread_title">Start the conversation before booking</string>
+    <string name="chat_empty_thread_body">Ask a quick question or confirm job details in real time. No booking commitment required yet.</string>
 </resources>

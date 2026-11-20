@@ -30,7 +30,7 @@ service cloud.firestore {
 
     // Entity validation helpers
     function isValidUserAccount(data) {
-      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+      return data.userId is string && isValidId(data.userId) &&
              data.fullName is string && data.fullName.size() >= 1 && data.fullName.size() <= 120 &&
              data.ageVerified is bool &&
              (!('email' in data) || (data.email is string && data.email.size() <= 200)) &&
@@ -42,7 +42,7 @@ service cloud.firestore {
     }
 
     function isValidProviderProfile(data) {
-      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+      return data.userId is string && isValidId(data.userId) &&
              data.businessName is string && data.businessName.size() >= 2 && data.businessName.size() <= 120 &&
              (!('description' in data) || (data.description is string && data.description.size() <= 1200)) &&
              data.categorySlug is string && data.categorySlug.size() >= 1 && data.categorySlug.size() <= 120 && data.categorySlug.matches('^[a-z0-9\\-]+$') &&
@@ -177,6 +177,14 @@ service cloud.firestore {
              );
     }
 
+    function isReviewablePublishedProvider(providerId, claimedProviderUserId) {
+      let providerPath = /databases/$(database)/documents/providerProfiles/$(providerId);
+      return exists(providerPath) &&
+             get(providerPath).data.userId == claimedProviderUserId &&
+             get(providerPath).data.userId != request.auth.uid &&
+             get(providerPath).data.listingStatus == 'published';
+    }
+
     // Service booking requests linked between customer and provider profile
     match /bookings/{bookingId} {
       allow get: if isSignedIn() && isValidId(bookingId) && (
@@ -253,7 +261,7 @@ service cloud.firestore {
              isValidTimestamp(data.updatedAt);
     }
 
-    // Customer reviews & ratings linked to /providerProfiles/{providerId}
+    // Customer reviews & ratings linked to /providerProfiles/{providerId} (blocks self-reviews & draft reviews)
     match /reviews/{reviewId} {
       allow get: if isSignedIn() && isValidId(reviewId);
       allow list: if isSignedIn();
@@ -262,6 +270,7 @@ service cloud.firestore {
                        isValidId(reviewId) &&
                        reviewId == incoming().providerId + '__' + request.auth.uid &&
                        incoming().customerId == request.auth.uid &&
+                       incoming().providerUserId != request.auth.uid &&
                        incoming().keys().hasAll([
                          'providerId', 'providerUserId', 'customerId', 'reviewerName',
                          'rating', 'comment', 'createdAt', 'updatedAt'
@@ -271,7 +280,7 @@ service cloud.firestore {
                          'rating', 'comment', 'bookingId', 'createdAt', 'updatedAt'
                        ]) &&
                        isValidProviderReview(incoming()) &&
-                       isBookableProvider(incoming().providerId, incoming().providerUserId);
+                       isReviewablePublishedProvider(incoming().providerId, incoming().providerUserId);
 
       allow update: if isSignedIn() &&
                        isValidId(reviewId) &&
@@ -288,6 +297,432 @@ service cloud.firestore {
       allow delete: if isSignedIn() &&
                        isValidId(reviewId) &&
                        request.auth.uid == existing().customerId;
+    }
+
+    // Billing & Subscription helpers (PCI-safe, server-enforced price & quota matrix)
+    function isSafeMaskedInstrument(val) {
+      return val is string &&
+             val.size() >= 3 &&
+             val.size() <= 80 &&
+             !val.matches('.*[0-9]{6,}.*');
+    }
+
+    function matchesPlanPricingMatrix(tier, cycle, method, amountCents, bookingLimit, maxCategories) {
+      return (
+        (tier == 'free_starter' && cycle in ['monthly', 'yearly'] && method == 'none' && amountCents == 0 && bookingLimit == 3 && maxCategories == 1) ||
+        (tier == 'growth_pro' && cycle == 'monthly' && method != 'none' && amountCents == 499 && bookingLimit == 9999 && maxCategories == 3) ||
+        (tier == 'growth_pro' && cycle == 'yearly' && method != 'none' && amountCents == 4192 && bookingLimit == 9999 && maxCategories == 3) ||
+        (tier == 'business_elite' && cycle == 'monthly' && method != 'none' && amountCents == 999 && bookingLimit == 9999 && maxCategories == 10) ||
+        (tier == 'business_elite' && cycle == 'yearly' && method != 'none' && amountCents == 8392 && bookingLimit == 9999 && maxCategories == 10)
+      );
+    }
+
+    function matchesPaymentLedgerMath(tier, cycle, method, subtotalCents, discountCents, amountCents) {
+      return subtotalCents is int && discountCents is int && amountCents is int &&
+             (subtotalCents - discountCents) == amountCents &&
+             (
+               (tier == 'free_starter' && cycle in ['monthly', 'yearly'] && method == 'none' && subtotalCents == 0 && discountCents == 0 && amountCents == 0) ||
+               (tier == 'growth_pro' && cycle == 'monthly' && method != 'none' && subtotalCents == 499 && discountCents == 0 && amountCents == 499) ||
+               (tier == 'growth_pro' && cycle == 'yearly' && method != 'none' && subtotalCents == 5988 && discountCents == 1796 && amountCents == 4192) ||
+               (tier == 'business_elite' && cycle == 'monthly' && method != 'none' && subtotalCents == 999 && discountCents == 0 && amountCents == 999) ||
+               (tier == 'business_elite' && cycle == 'yearly' && method != 'none' && subtotalCents == 11988 && discountCents == 3596 && amountCents == 8392)
+             );
+    }
+
+    function ownsProviderProfile(providerId) {
+      let providerPath = /databases/$(database)/documents/providerProfiles/$(providerId);
+      return exists(providerPath) && get(providerPath).data.userId == request.auth.uid;
+    }
+
+    function isValidProviderSubscription(data) {
+      return data.userId is string && isValidId(data.userId) &&
+             data.providerId is string && isValidId(data.providerId) &&
+             data.businessName is string && data.businessName.size() >= 2 && data.businessName.size() <= 120 &&
+             data.planTier is string && data.planTier in ['free_starter', 'growth_pro', 'business_elite'] &&
+             data.billingCycle is string && data.billingCycle in ['monthly', 'yearly'] &&
+             data.paymentMethod is string && data.paymentMethod in ['none', 'ecocash', 'visa', 'mastercard', 'innbucks', 'paypal', 'bank_eft'] &&
+             data.currency is string && data.currency == 'USD' &&
+             data.amountCents is int &&
+             data.monthlyBookingLimit is int &&
+             data.maxCategories is int &&
+             data.subscriptionStatus is string && data.subscriptionStatus in ['active', 'pending_confirmation', 'cancelled'] &&
+             (
+               data.planTier != 'free_starter' ||
+               data.subscriptionStatus in ['active', 'cancelled']
+             ) &&
+             data.autoRenew is bool &&
+             (!('maskedInstrument' in data) || isSafeMaskedInstrument(data.maskedInstrument)) &&
+             (!('verificationId' in data) || isValidId(data.verificationId)) &&
+             (
+               data.amountCents == 0 ||
+               ('verificationId' in data && hasValidFinancialVerification(data.verificationId))
+             ) &&
+             matchesPlanPricingMatrix(data.planTier, data.billingCycle, data.paymentMethod, data.amountCents, data.monthlyBookingLimit, data.maxCategories) &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidBillingPayment(data) {
+      return data.userId is string && isValidId(data.userId) &&
+             data.providerId is string && isValidId(data.providerId) &&
+             data.planTier is string && data.planTier in ['free_starter', 'growth_pro', 'business_elite'] &&
+             data.billingCycle is string && data.billingCycle in ['monthly', 'yearly'] &&
+             data.paymentMethod is string && data.paymentMethod in ['none', 'ecocash', 'visa', 'mastercard', 'innbucks', 'paypal', 'bank_eft'] &&
+             data.currency is string && data.currency == 'USD' &&
+             isSafeMaskedInstrument(data.maskedInstrument) &&
+             data.invoiceNumber is string && data.invoiceNumber.size() >= 6 && data.invoiceNumber.size() <= 40 && data.invoiceNumber.matches('^[A-Z0-9\\-]+$') &&
+             data.paymentStatus is string && data.paymentStatus in ['authorized', 'pending_gateway', 'free_activated'] &&
+             (
+               (data.planTier == 'free_starter' && data.paymentStatus == 'free_activated') ||
+               (data.planTier != 'free_starter' && data.paymentStatus in ['authorized', 'pending_gateway'])
+             ) &&
+             (!('verificationId' in data) || isValidId(data.verificationId)) &&
+             (
+               data.amountCents == 0 ||
+               ('verificationId' in data && hasValidFinancialVerification(data.verificationId))
+             ) &&
+             matchesPaymentLedgerMath(data.planTier, data.billingCycle, data.paymentMethod, data.subtotalCents, data.discountCents, data.amountCents) &&
+             isValidTimestamp(data.createdAt);
+    }
+
+    function isValidProviderSecurityConfig(data) {
+      return data.userId is string && isValidId(data.userId) &&
+             data.providerId is string && isValidId(data.providerId) &&
+             data.twoFactorEnabled is bool &&
+             data.twoFactorType is string && data.twoFactorType in ['totp_authenticator', 'firebase_mfa_and_totp'] &&
+             data.secretFingerprint is string && data.secretFingerprint.matches('^[a-f0-9]{64}$') &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidFinancialVerification(data) {
+      let nowSeconds = request.time.toMillis() / 1000;
+      return data.userId is string && isValidId(data.userId) &&
+             data.providerId is string && isValidId(data.providerId) &&
+             data.verificationMethod is string && data.verificationMethod in ['firebase_reauth_and_totp', 'firebase_native_mfa_and_totp'] &&
+             data.reauthenticated is bool && data.reauthenticated == true &&
+             data.totpVerified is bool && data.totpVerified == true &&
+             data.firebaseAuthTimeSeconds is int &&
+             data.firebaseAuthTimeSeconds <= (nowSeconds + 60) &&
+             (nowSeconds - data.firebaseAuthTimeSeconds) <= 900 &&
+             data.actionType is string && data.actionType in ['activate_subscription', 'switch_plan', 'update_payment_method'] &&
+             isValidTimestamp(data.verifiedAt);
+    }
+
+    function hasValidFinancialVerification(verificationId) {
+      let verPath = /databases/$(database)/documents/financialVerifications/$(verificationId);
+      return exists(verPath) &&
+             get(verPath).data.userId == request.auth.uid &&
+             get(verPath).data.providerId == request.auth.uid &&
+             get(verPath).data.reauthenticated == true &&
+             get(verPath).data.totpVerified == true &&
+             ((request.time.toMillis() / 1000) - get(verPath).data.firebaseAuthTimeSeconds) <= 900;
+    }
+
+    // Owner-only 2FA enrollment state (stores SHA-256 fingerprint only, never plaintext secret)
+    match /providerSecurity/{providerId} {
+      allow get: if isSignedIn() && isValidId(providerId) && request.auth.uid == providerId;
+      allow list: if isSignedIn() && existing().userId == request.auth.uid;
+
+      allow create: if isSignedIn() &&
+                       isValidId(providerId) &&
+                       request.auth.uid == providerId &&
+                       incoming().userId == request.auth.uid &&
+                       incoming().providerId == providerId &&
+                       incoming().keys().hasAll([
+                         'userId', 'providerId', 'twoFactorEnabled', 'twoFactorType',
+                         'secretFingerprint', 'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'userId', 'providerId', 'twoFactorEnabled', 'twoFactorType',
+                         'secretFingerprint', 'createdAt', 'updatedAt'
+                       ]) &&
+                       isValidProviderSecurityConfig(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(providerId) &&
+                       isValidProviderSecurityConfig(incoming()) &&
+                       request.auth.uid == providerId &&
+                       incoming().userId == existing().userId &&
+                       incoming().providerId == existing().providerId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'twoFactorEnabled', 'twoFactorType', 'secretFingerprint', 'updatedAt'
+                       ]);
+
+      allow delete: if false;
+    }
+
+    // Immutable 2FA verification audit log required prior to paid billing writes
+    match /financialVerifications/{verificationId} {
+      allow get: if isSignedIn() && isValidId(verificationId) && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && existing().userId == request.auth.uid;
+
+      allow create: if isSignedIn() &&
+                       isValidId(verificationId) &&
+                       incoming().userId == request.auth.uid &&
+                       incoming().providerId == request.auth.uid &&
+                       incoming().keys().hasAll([
+                         'userId', 'providerId', 'verificationMethod', 'reauthenticated',
+                         'totpVerified', 'firebaseAuthTimeSeconds', 'actionType', 'verifiedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'userId', 'providerId', 'verificationMethod', 'reauthenticated',
+                         'totpVerified', 'firebaseAuthTimeSeconds', 'actionType', 'verifiedAt'
+                       ]) &&
+                       isValidFinancialVerification(incoming());
+
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // Owner-only provider subscriptions linked to /providerProfiles/{providerId}
+    match /providerSubscriptions/{providerId} {
+      allow get: if isSignedIn() && isValidId(providerId) && request.auth.uid == providerId;
+      allow list: if isSignedIn() && existing().userId == request.auth.uid;
+
+      allow create: if isSignedIn() &&
+                       isValidId(providerId) &&
+                       request.auth.uid == providerId &&
+                       incoming().userId == request.auth.uid &&
+                       incoming().providerId == providerId &&
+                       incoming().keys().hasAll([
+                         'userId', 'providerId', 'businessName', 'planTier', 'billingCycle',
+                         'paymentMethod', 'currency', 'amountCents', 'monthlyBookingLimit',
+                         'maxCategories', 'subscriptionStatus', 'autoRenew', 'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'userId', 'providerId', 'businessName', 'planTier', 'billingCycle',
+                         'paymentMethod', 'currency', 'amountCents', 'monthlyBookingLimit',
+                         'maxCategories', 'subscriptionStatus', 'autoRenew', 'maskedInstrument',
+                         'verificationId', 'createdAt', 'updatedAt'
+                       ]) &&
+                       isValidProviderSubscription(incoming()) &&
+                       ownsProviderProfile(providerId);
+
+      allow update: if isSignedIn() &&
+                       isValidId(providerId) &&
+                       isValidProviderSubscription(incoming()) &&
+                       request.auth.uid == providerId &&
+                       incoming().userId == existing().userId &&
+                       incoming().providerId == existing().providerId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'businessName', 'planTier', 'billingCycle', 'paymentMethod',
+                         'currency', 'amountCents', 'monthlyBookingLimit', 'maxCategories',
+                         'subscriptionStatus', 'autoRenew', 'maskedInstrument', 'verificationId', 'updatedAt'
+                       ]);
+
+      allow delete: if false;
+    }
+
+    // Immutable append-only billing checkout ledger (masked instruments only)
+    match /billingPayments/{paymentId} {
+      allow get: if isSignedIn() && isValidId(paymentId) && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && existing().userId == request.auth.uid;
+
+      allow create: if isSignedIn() &&
+                       isValidId(paymentId) &&
+                       incoming().userId == request.auth.uid &&
+                       incoming().providerId == request.auth.uid &&
+                       incoming().keys().hasAll([
+                         'userId', 'providerId', 'planTier', 'billingCycle', 'paymentMethod',
+                         'currency', 'subtotalCents', 'discountCents', 'amountCents',
+                         'maskedInstrument', 'invoiceNumber', 'paymentStatus', 'createdAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'userId', 'providerId', 'planTier', 'billingCycle', 'paymentMethod',
+                         'currency', 'subtotalCents', 'discountCents', 'amountCents',
+                         'maskedInstrument', 'invoiceNumber', 'paymentStatus', 'verificationId', 'createdAt'
+                       ]) &&
+                       isValidBillingPayment(incoming()) &&
+                       ownsProviderProfile(incoming().providerId);
+
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    function isValidChatThread(data) {
+      return data.customerId is string && isValidId(data.customerId) &&
+             data.providerId is string && isValidId(data.providerId) &&
+             data.providerUserId is string && isValidId(data.providerUserId) &&
+             data.customerId != data.providerUserId &&
+             data.participantIds is list && data.participantIds.size() == 2 &&
+             data.participantIds[0] == data.customerId &&
+             data.participantIds[1] == data.providerUserId &&
+             data.customerName is string && data.customerName.size() >= 1 && data.customerName.size() <= 120 &&
+             data.providerBusinessName is string && data.providerBusinessName.size() >= 2 && data.providerBusinessName.size() <= 120 &&
+             data.providerCategoryName is string && data.providerCategoryName.size() >= 1 && data.providerCategoryName.size() <= 120 &&
+             data.lastMessageText is string && data.lastMessageText.size() >= 1 && data.lastMessageText.size() <= 1000 &&
+             data.lastSenderId is string && data.lastSenderId in data.participantIds &&
+             data.messageCount is int && data.messageCount >= 1 &&
+             (!('lastCustomerReadAt' in data) || isValidTimestamp(data.lastCustomerReadAt)) &&
+             (!('lastProviderReadAt' in data) || isValidTimestamp(data.lastProviderReadAt)) &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidChatMessage(data, expectedThreadId) {
+      return data.threadId is string && data.threadId == expectedThreadId &&
+             data.providerId is string && isValidId(data.providerId) &&
+             data.providerUserId is string && isValidId(data.providerUserId) &&
+             data.customerId is string && isValidId(data.customerId) &&
+             data.customerId != data.providerUserId &&
+             data.participantIds is list && data.participantIds.size() == 2 &&
+             data.participantIds[0] == data.customerId &&
+             data.participantIds[1] == data.providerUserId &&
+             data.senderId is string && data.senderId in data.participantIds &&
+             data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 120 &&
+             data.body is string && data.body.size() >= 1 && data.body.size() <= 1000 &&
+             data.messageType is string && data.messageType in ['text', 'pre_booking_inquiry', 'quote_update'] &&
+             data.clientSentMillis is int && data.clientSentMillis > 0 &&
+             isValidTimestamp(data.sentAt);
+    }
+
+    // Real-time pre-booking chat threads between customer and provider
+    match /chatThreads/{threadId} {
+      allow get: if isSignedIn() && isValidId(threadId) && (
+        (resource != null && request.auth.uid in existing().participantIds) ||
+        (resource == null && (
+          threadId.matches('^[a-zA-Z0-9_\\-]+__' + request.auth.uid + '$') ||
+          threadId.matches('^' + request.auth.uid + '__[a-zA-Z0-9_\\-]+$')
+        ))
+      );
+      allow list: if isSignedIn() && (request.auth.uid in existing().participantIds);
+
+      allow create: if isSignedIn() &&
+                       isValidId(threadId) &&
+                       threadId == (incoming().providerId + '__' + incoming().customerId) &&
+                       incoming().customerId == request.auth.uid &&
+                       incoming().lastSenderId == request.auth.uid &&
+                       incoming().messageCount == 1 &&
+                       incoming().keys().hasAll([
+                         'customerId', 'providerId', 'providerUserId', 'participantIds',
+                         'customerName', 'providerBusinessName', 'providerCategoryName',
+                         'lastMessageText', 'lastSenderId', 'messageCount',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'customerId', 'providerId', 'providerUserId', 'participantIds',
+                         'customerName', 'providerBusinessName', 'providerCategoryName',
+                         'lastMessageText', 'lastSenderId', 'messageCount',
+                         'lastCustomerReadAt', 'lastProviderReadAt',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       isValidChatThread(incoming()) &&
+                       exists(/databases/$(database)/documents/providerProfiles/$(incoming().providerId)) &&
+                       get(/databases/$(database)/documents/providerProfiles/$(incoming().providerId)).data.userId == incoming().providerUserId;
+
+      allow update: if isSignedIn() &&
+                       isValidId(threadId) &&
+                       request.auth.uid in existing().participantIds &&
+                       isValidChatThread(incoming()) &&
+                       incoming().customerId == existing().customerId &&
+                       incoming().providerId == existing().providerId &&
+                       incoming().providerUserId == existing().providerUserId &&
+                       incoming().participantIds == existing().participantIds &&
+                       incoming().providerBusinessName == existing().providerBusinessName &&
+                       incoming().providerCategoryName == existing().providerCategoryName &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().messageCount >= existing().messageCount &&
+                       incoming().messageCount <= existing().messageCount + 1 &&
+                       (
+                         (incoming().lastMessageText == existing().lastMessageText &&
+                          incoming().lastSenderId == existing().lastSenderId &&
+                          incoming().messageCount == existing().messageCount) ||
+                         incoming().lastSenderId == request.auth.uid
+                       ) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'lastMessageText', 'lastSenderId', 'messageCount', 'customerName',
+                         'lastCustomerReadAt', 'lastProviderReadAt', 'updatedAt'
+                       ]);
+
+      allow delete: if false;
+
+      // Participant-isolated real-time messages (denormalized participantIds avoids parent get() on list)
+      match /messages/{messageId} {
+        allow get: if isSignedIn() && isValidId(messageId) && (request.auth.uid in existing().participantIds);
+        allow list: if isSignedIn() && (request.auth.uid in existing().participantIds);
+
+        allow create: if isSignedIn() &&
+                         isValidId(threadId) &&
+                         isValidId(messageId) &&
+                         request.auth.uid in incoming().participantIds &&
+                         incoming().senderId == request.auth.uid &&
+                         incoming().keys().hasAll([
+                           'threadId', 'providerId', 'providerUserId', 'customerId',
+                           'participantIds', 'senderId', 'senderName', 'body',
+                           'messageType', 'clientSentMillis', 'sentAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'threadId', 'providerId', 'providerUserId', 'customerId',
+                           'participantIds', 'senderId', 'senderName', 'body',
+                           'messageType', 'clientSentMillis', 'sentAt'
+                         ]) &&
+                         isValidChatMessage(incoming(), threadId) &&
+                         getAfter(/databases/$(database)/documents/chatThreads/$(threadId)).data.participantIds == incoming().participantIds &&
+                         getAfter(/databases/$(database)/documents/chatThreads/$(threadId)).data.providerId == incoming().providerId &&
+                         getAfter(/databases/$(database)/documents/chatThreads/$(threadId)).data.providerUserId == incoming().providerUserId &&
+                         getAfter(/databases/$(database)/documents/chatThreads/$(threadId)).data.customerId == incoming().customerId;
+
+        allow update: if false;
+        allow delete: if false;
+      }
+    }
+
+    // Server-side 3-second cooldown gate preventing chat overload/spam bursts
+    match /chatRateLimits/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+      allow list: if false;
+
+      allow create: if isSignedIn() &&
+                       isValidId(userId) &&
+                       request.auth.uid == userId &&
+                       incoming().userId == request.auth.uid &&
+                       incoming().keys().hasAll(['userId', 'lastMessageAt']) &&
+                       incoming().keys().hasOnly(['userId', 'lastMessageAt']) &&
+                       incoming().lastMessageAt == request.time;
+
+      allow update: if isSignedIn() &&
+                       isValidId(userId) &&
+                       request.auth.uid == userId &&
+                       incoming().userId == existing().userId &&
+                       incoming().keys().hasAll(['userId', 'lastMessageAt']) &&
+                       incoming().keys().hasOnly(['userId', 'lastMessageAt']) &&
+                       incoming().lastMessageAt == request.time &&
+                       request.time >= existing().lastMessageAt + duration.value(3, 's');
+
+      allow delete: if false;
+    }
+
+    function isValidCommunityMessage(data) {
+      return data.senderId is string && isValidId(data.senderId) &&
+             data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 120 &&
+             data.senderRole is string && data.senderRole in ['member', 'provider'] &&
+             data.body is string && data.body.size() >= 1 && data.body.size() <= 1000 &&
+             data.clientSentMillis is int && data.clientSentMillis > 0 &&
+             isValidTimestamp(data.sentAt);
+    }
+
+    // Open community room for everyone signed in, guarded atomically by /chatRateLimits/{uid} (3s cooldown)
+    match /communityMessages/{messageId} {
+      allow get: if isSignedIn() && isValidId(messageId);
+      allow list: if isSignedIn();
+
+      allow create: if isSignedIn() &&
+                       isValidId(messageId) &&
+                       incoming().senderId == request.auth.uid &&
+                       incoming().keys().hasAll([
+                         'senderId', 'senderName', 'senderRole', 'body', 'clientSentMillis', 'sentAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'senderId', 'senderName', 'senderRole', 'body', 'clientSentMillis', 'sentAt'
+                       ]) &&
+                       isValidCommunityMessage(incoming()) &&
+                       getAfter(/databases/$(database)/documents/chatRateLimits/$(request.auth.uid)).data.lastMessageAt == request.time;
+
+      allow update: if false;
+      allow delete: if false;
     }
   }
 }

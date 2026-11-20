@@ -146,6 +146,7 @@ fun DiscoverScreen(
     onSignInClick: () -> Unit,
     onRequestBooking: (ProviderProfile) -> Unit = {},
     onViewProviderProfile: (ProviderProfile) -> Unit = {},
+    onMessageProvider: (ProviderProfile) -> Unit = {},
     onContactClick: () -> Unit,
     contentPadding: PaddingValues = PaddingValues(0.dp),
 ) {
@@ -373,6 +374,7 @@ fun DiscoverScreen(
                     onEditOwnListingClick = onListBusinessClick,
                     onRequestBooking = onRequestBooking,
                     onViewProviderProfile = onViewProviderProfile,
+                    onMessageProvider = onMessageProvider,
                 )
             } else {
                 LazyColumn(

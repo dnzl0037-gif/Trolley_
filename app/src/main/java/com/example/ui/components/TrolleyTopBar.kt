@@ -4,6 +4,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -14,10 +16,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.DarkMode
-import androidx.compose.material.icons.rounded.LightMode
+import androidx.compose.material.icons.rounded.ChatBubbleOutline
+import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Storefront
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -46,13 +50,15 @@ import com.example.ui.theme.TrolleyTheme
 
 @Composable
 fun TrolleyTopBar(
-    darkTheme: Boolean,
     isSignedIn: Boolean,
-    onToggleTheme: () -> Unit,
+    unreadMessagesCount: Int = 0,
+    onOpenMenu: () -> Unit,
+    onOpenMessages: () -> Unit = {},
     onOpenAccountOrBusiness: () -> Unit,
     onOpenProfile: () -> Unit = onOpenAccountOrBusiness,
 ) {
-    val themeInteraction = remember { MutableInteractionSource() }
+    val menuInteraction = remember { MutableInteractionSource() }
+    val messagesInteraction = remember { MutableInteractionSource() }
     val profileInteraction = remember { MutableInteractionSource() }
     val ctaInteraction = remember { MutableInteractionSource() }
 
@@ -60,25 +66,49 @@ fun TrolleyTopBar(
         color = MaterialTheme.colorScheme.background,
         modifier = Modifier.fillMaxWidth(),
     ) {
-        androidx.compose.foundation.layout.Column {
+        Column {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .statusBarsPadding()
-                    .padding(horizontal = 18.dp, vertical = 12.dp),
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, TrolleyTheme.colors.hairline),
+                        modifier = Modifier.trolleySpringPress(menuInteraction, pressedScale = 0.92f),
+                    ) {
+                        IconButton(
+                            onClick = onOpenMenu,
+                            interactionSource = menuInteraction,
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .testTag("dashboard_menu_button"),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Menu,
+                                contentDescription = stringResource(R.string.open_dashboard_menu_desc),
+                                tint = MaterialTheme.colorScheme.onBackground,
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(10.dp))
+
                     Image(
                         painter = painterResource(id = R.drawable.trolley_logo),
                         contentDescription = stringResource(R.string.app_name),
                         contentScale = ContentScale.Crop,
                         modifier = Modifier
-                            .size(36.dp)
-                            .clip(RoundedCornerShape(11.dp)),
+                            .size(34.dp)
+                            .clip(RoundedCornerShape(10.dp)),
                     )
-                    Spacer(modifier = Modifier.width(10.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = buildAnnotatedString {
                             append(stringResource(R.string.brand_wordmark))
@@ -88,7 +118,7 @@ fun TrolleyTopBar(
                         },
                         fontFamily = ManropeFontFamily,
                         fontWeight = FontWeight.ExtraBold,
-                        fontSize = 23.sp,
+                        fontSize = 22.sp,
                         letterSpacing = (-1.1).sp,
                         color = MaterialTheme.colorScheme.onBackground,
                     )
@@ -98,29 +128,42 @@ fun TrolleyTopBar(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Surface(
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.background,
-                        border = BorderStroke(1.dp, TrolleyTheme.colors.hairline),
-                        modifier = Modifier.trolleySpringPress(themeInteraction, pressedScale = 0.92f),
-                    ) {
-                        IconButton(
-                            onClick = onToggleTheme,
-                            interactionSource = themeInteraction,
-                            modifier = Modifier
-                                .minimumInteractiveComponentSize()
-                                .testTag("theme_toggle_button"),
-                        ) {
-                            Icon(
-                                imageVector = if (darkTheme) Icons.Rounded.LightMode else Icons.Rounded.DarkMode,
-                                contentDescription = stringResource(R.string.toggle_theme_desc),
-                                tint = MaterialTheme.colorScheme.onBackground,
-                                modifier = Modifier.size(18.dp),
-                            )
-                        }
-                    }
-
                     if (isSignedIn) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.surface,
+                            border = BorderStroke(1.dp, TrolleyTheme.colors.hairline),
+                            modifier = Modifier.trolleySpringPress(messagesInteraction, pressedScale = 0.92f),
+                        ) {
+                            IconButton(
+                                onClick = onOpenMessages,
+                                interactionSource = messagesInteraction,
+                                modifier = Modifier
+                                    .minimumInteractiveComponentSize()
+                                    .testTag("top_bar_messages_button"),
+                            ) {
+                                BadgedBox(
+                                    badge = {
+                                        if (unreadMessagesCount > 0) {
+                                            Badge(
+                                                containerColor = TrolleyTheme.colors.orange,
+                                                contentColor = MaterialTheme.colorScheme.onPrimary,
+                                            ) {
+                                                Text(unreadMessagesCount.coerceAtMost(9).toString())
+                                            }
+                                        }
+                                    },
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.ChatBubbleOutline,
+                                        contentDescription = stringResource(R.string.chat_inbox_title),
+                                        tint = MaterialTheme.colorScheme.onBackground,
+                                        modifier = Modifier.size(19.dp),
+                                    )
+                                }
+                            }
+                        }
+
                         Surface(
                             shape = CircleShape,
                             color = TrolleyTheme.colors.lime,

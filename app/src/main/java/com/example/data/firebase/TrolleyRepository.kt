@@ -2,12 +2,24 @@ package com.example.data.firebase
 
 import android.content.Context
 import com.example.R
+import com.example.data.catalog.BillingCatalog
+import com.example.data.catalog.BillingCycle
+import com.example.data.catalog.PaymentMethodType
+import com.example.data.catalog.PaymentValidator
 import com.example.data.catalog.ServiceTaxonomy
+import com.example.data.catalog.SubscriptionTier
+import com.example.data.model.BillingPayment
 import com.example.data.model.BookingRequest
 import com.example.data.model.BookingValidator
+import com.example.data.model.ChatMessage
+import com.example.data.model.ChatThread
+import com.example.data.model.ChatValidator
+import com.example.data.model.FinancialVerification
 import com.example.data.model.ProviderProfile
 import com.example.data.model.ProviderRatingSummary
 import com.example.data.model.ProviderReview
+import com.example.data.model.ProviderSecurityConfig
+import com.example.data.model.ProviderSubscription
 import com.example.data.model.ReviewCalculator
 import com.example.data.model.UserAccount
 import com.google.firebase.Firebase
@@ -758,8 +770,11 @@ class TrolleyRepository(
             require(provider.id.isNotBlank() && provider.userId.isNotBlank()) {
                 "Selected provider profile reference is missing."
             }
-            require(provider.listingStatus == "published" || provider.userId == uid) {
-                "Reviews can only be submitted for published providers or your own business preview."
+            require(provider.userId != uid) {
+                "You cannot submit a customer rating for your own provider profile."
+            }
+            require(provider.listingStatus == "published") {
+                "Reviews can only be submitted for published providers."
             }
             require(ReviewCalculator.isValidRating(rating)) {
                 "Please select a rating from 1 to 5 stars."
@@ -827,6 +842,545 @@ class TrolleyRepository(
             throw e
         } catch (e: Exception) {
             handleFirestoreError(e, OperationType.DELETE, docPath)
+            Result.failure(e)
+        }
+    }
+
+    fun observeProviderSubscription(userId: String): Flow<ProviderSubscription?> = flow {
+        val uid = requireUserId()
+        check(uid == userId) { "Signed-in user mismatch." }
+        val path = "providerSubscriptions/$uid"
+        emitAll(
+            db.collection("providerSubscriptions").document(uid)
+                .snapshots()
+                .map { snapshot ->
+                    snapshot.toObject(
+                        ProviderSubscription::class.java,
+                        DocumentSnapshot.ServerTimestampBehavior.ESTIMATE,
+                    )
+                }
+                .catch { error ->
+                    val firestoreError = generateSequence(error) { it.cause }
+                        .filterIsInstance<FirebaseFirestoreException>()
+                        .firstOrNull()
+                    if (firestoreError == null && error is CancellationException) throw error
+                    val exceptionToLog = firestoreError ?: (error as? Exception)
+                    if (exceptionToLog != null && auth.currentUser?.uid == uid) {
+                        handleFirestoreError(exceptionToLog, OperationType.GET, path)
+                    }
+                    throw error
+                }
+        )
+    }
+
+    fun observeBillingPayments(userId: String): Flow<List<BillingPayment>> = flow {
+        val uid = requireUserId()
+        check(uid == userId) { "Signed-in user mismatch." }
+        val path = "billingPayments"
+        emitAll(
+            db.collection("billingPayments")
+                .whereEqualTo("userId", uid)
+                .snapshots()
+                .map { snapshot ->
+                    snapshot.toObjects(
+                        BillingPayment::class.java,
+                        DocumentSnapshot.ServerTimestampBehavior.ESTIMATE,
+                    ).sortedByDescending { it.createdAt?.toDate()?.time ?: 0L }
+                }
+                .catch { error ->
+                    val firestoreError = generateSequence(error) { it.cause }
+                        .filterIsInstance<FirebaseFirestoreException>()
+                        .firstOrNull()
+                    if (firestoreError == null && error is CancellationException) throw error
+                    val exceptionToLog = firestoreError ?: (error as? Exception)
+                    if (exceptionToLog != null && auth.currentUser?.uid == uid) {
+                        handleFirestoreError(exceptionToLog, OperationType.LIST, path)
+                    }
+                    throw error
+                }
+        )
+    }
+
+    fun observeProviderSecurityConfig(userId: String): Flow<ProviderSecurityConfig?> = flow {
+        val uid = requireUserId()
+        check(uid == userId) { "Signed-in user mismatch." }
+        val path = "providerSecurity/$uid"
+        emitAll(
+            db.collection("providerSecurity").document(uid)
+                .snapshots()
+                .map { snapshot ->
+                    snapshot.toObject(
+                        ProviderSecurityConfig::class.java,
+                        DocumentSnapshot.ServerTimestampBehavior.ESTIMATE,
+                    )
+                }
+                .catch { error ->
+                    val firestoreError = generateSequence(error) { it.cause }
+                        .filterIsInstance<FirebaseFirestoreException>()
+                        .firstOrNull()
+                    if (firestoreError == null && error is CancellationException) throw error
+                    val exceptionToLog = firestoreError ?: (error as? Exception)
+                    if (exceptionToLog != null && auth.currentUser?.uid == uid) {
+                        handleFirestoreError(exceptionToLog, OperationType.GET, path)
+                    }
+                    throw error
+                }
+        )
+    }
+
+    suspend fun saveProviderSecurityEnrollment(
+        userId: String,
+        secretFingerprint: String,
+        hasNativeFirebaseMfa: Boolean,
+    ): Result<Unit> {
+        val docPath = "providerSecurity/$userId"
+        return try {
+            val uid = requireUserId()
+            check(uid == userId) { "Signed-in user changed; refusing cross-user 2FA write." }
+            val cleanFp = secretFingerprint.trim().lowercase(Locale.ENGLISH)
+            require(cleanFp.matches(Regex("^[a-f0-9]{64}$"))) {
+                "Invalid 2FA key fingerprint format."
+            }
+            val factorType = if (hasNativeFirebaseMfa) "firebase_mfa_and_totp" else "totp_authenticator"
+            val docRef = db.collection("providerSecurity").document(uid)
+            val existing = docRef.get().await()
+            if (existing.exists()) {
+                docRef.update(
+                    mapOf(
+                        "twoFactorEnabled" to true,
+                        "twoFactorType" to factorType,
+                        "secretFingerprint" to cleanFp,
+                        "updatedAt" to FieldValue.serverTimestamp(),
+                    )
+                ).await()
+            } else {
+                docRef.set(
+                    mapOf(
+                        "userId" to uid,
+                        "providerId" to uid,
+                        "twoFactorEnabled" to true,
+                        "twoFactorType" to factorType,
+                        "secretFingerprint" to cleanFp,
+                        "createdAt" to FieldValue.serverTimestamp(),
+                        "updatedAt" to FieldValue.serverTimestamp(),
+                    )
+                ).await()
+            }
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, docPath)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun recordFinancialVerificationAudit(
+        userId: String,
+        firebaseAuthTimeSeconds: Long,
+        hasNativeFirebaseMfa: Boolean,
+        actionType: String = "activate_subscription",
+    ): Result<String> {
+        var docPath = "financialVerifications"
+        return try {
+            val uid = requireUserId()
+            check(uid == userId) { "Signed-in user changed; refusing cross-user verification log." }
+            require(firebaseAuthTimeSeconds > 0L) {
+                "Firebase Auth step-up timestamp is missing. Re-authenticate with Google first."
+            }
+            require(actionType in setOf("activate_subscription", "switch_plan", "update_payment_method")) {
+                "Unsupported financial verification action."
+            }
+            val method = if (hasNativeFirebaseMfa) {
+                "firebase_native_mfa_and_totp"
+            } else {
+                "firebase_reauth_and_totp"
+            }
+            val docRef = db.collection("financialVerifications").document()
+            docPath = docRef.path
+            docRef.set(
+                mapOf(
+                    "userId" to uid,
+                    "providerId" to uid,
+                    "verificationMethod" to method,
+                    "reauthenticated" to true,
+                    "totpVerified" to true,
+                    "firebaseAuthTimeSeconds" to firebaseAuthTimeSeconds,
+                    "actionType" to actionType,
+                    "verifiedAt" to FieldValue.serverTimestamp(),
+                )
+            ).await()
+            Result.success(docRef.id)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, docPath)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun activateProviderSubscription(
+        userId: String,
+        businessName: String,
+        tier: SubscriptionTier,
+        cycle: BillingCycle,
+        method: PaymentMethodType,
+        autoRenew: Boolean,
+        mobileNumber: String = "",
+        cardholderName: String = "",
+        cardNumber: String = "",
+        cardExpiry: String = "",
+        cardCvc: String = "",
+        paypalEmail: String = "",
+        bankAccountRef: String = "",
+        verificationId: String? = null,
+    ): Result<String> {
+        var docPath = "providerSubscriptions/$userId"
+        return try {
+            val uid = requireUserId()
+            check(uid == userId) { "Signed-in user changed; refusing cross-user billing write." }
+            val cleanBusiness = businessName.trim().take(120)
+            require(cleanBusiness.length >= 2) {
+                "Create your provider business profile before choosing a billing plan."
+            }
+
+            val quote = BillingCatalog.computeQuote(tier, cycle)
+            val cleanVerificationId = verificationId?.trim()?.takeIf { it.isNotBlank() }
+            if (quote.amountCents > 0) {
+                require(cleanVerificationId != null) {
+                    "Two-factor authentication (Firebase Auth + 6-digit TOTP) is required before completing paid transactions."
+                }
+            }
+
+            val effectiveMethod = if (tier == SubscriptionTier.FREE_STARTER) PaymentMethodType.NONE else method
+            val validation = PaymentValidator.validateAndMask(
+                tier = tier,
+                method = effectiveMethod,
+                mobileNumber = mobileNumber,
+                cardholderName = cardholderName,
+                cardNumber = cardNumber,
+                cardExpiry = cardExpiry,
+                cardCvc = cardCvc,
+                paypalEmail = paypalEmail,
+                bankAccountLast4OrRef = bankAccountRef,
+            )
+            require(validation.isValid) {
+                validation.errorMessage ?: "Payment details failed security validation."
+            }
+            require(PaymentValidator.isSafeMaskedInstrument(validation.maskedInstrument)) {
+                "Payment instrument masking safety check failed."
+            }
+
+            val invoiceNumber = BillingCatalog.generateInvoiceNumber(uid)
+            val effectiveAutoRenew = tier != SubscriptionTier.FREE_STARTER &&
+                effectiveMethod.supportsAutoRenew &&
+                autoRenew
+
+            val subRef = db.collection("providerSubscriptions").document(uid)
+            val existingSub = subRef.get().await()
+
+            if (existingSub.exists()) {
+                val updates = mutableMapOf<String, Any>(
+                    "businessName" to cleanBusiness,
+                    "planTier" to tier.id,
+                    "billingCycle" to cycle.id,
+                    "paymentMethod" to effectiveMethod.id,
+                    "currency" to BillingCatalog.CURRENCY_USD,
+                    "amountCents" to quote.amountCents,
+                    "monthlyBookingLimit" to tier.monthlyBookingLimit,
+                    "maxCategories" to tier.maxCategories,
+                    "subscriptionStatus" to validation.subscriptionStatus,
+                    "autoRenew" to effectiveAutoRenew,
+                    "maskedInstrument" to validation.maskedInstrument,
+                    "updatedAt" to FieldValue.serverTimestamp(),
+                )
+                if (cleanVerificationId != null) {
+                    updates["verificationId"] = cleanVerificationId
+                } else if (existingSub.contains("verificationId")) {
+                    updates["verificationId"] = FieldValue.delete()
+                }
+                subRef.update(updates).await()
+            } else {
+                val payload = buildMap<String, Any> {
+                    put("userId", uid)
+                    put("providerId", uid)
+                    put("businessName", cleanBusiness)
+                    put("planTier", tier.id)
+                    put("billingCycle", cycle.id)
+                    put("paymentMethod", effectiveMethod.id)
+                    put("currency", BillingCatalog.CURRENCY_USD)
+                    put("amountCents", quote.amountCents)
+                    put("monthlyBookingLimit", tier.monthlyBookingLimit)
+                    put("maxCategories", tier.maxCategories)
+                    put("subscriptionStatus", validation.subscriptionStatus)
+                    put("autoRenew", effectiveAutoRenew)
+                    put("maskedInstrument", validation.maskedInstrument)
+                    if (cleanVerificationId != null) put("verificationId", cleanVerificationId)
+                    put("createdAt", FieldValue.serverTimestamp())
+                    put("updatedAt", FieldValue.serverTimestamp())
+                }
+                subRef.set(payload).await()
+            }
+
+            val paymentRef = db.collection("billingPayments").document()
+            docPath = paymentRef.path
+            val paymentPayload = buildMap<String, Any> {
+                put("userId", uid)
+                put("providerId", uid)
+                put("planTier", tier.id)
+                put("billingCycle", cycle.id)
+                put("paymentMethod", effectiveMethod.id)
+                put("currency", BillingCatalog.CURRENCY_USD)
+                put("subtotalCents", quote.subtotalCents)
+                put("discountCents", quote.discountCents)
+                put("amountCents", quote.amountCents)
+                put("maskedInstrument", validation.maskedInstrument)
+                put("invoiceNumber", invoiceNumber)
+                put("paymentStatus", validation.paymentStatus)
+                if (cleanVerificationId != null) put("verificationId", cleanVerificationId)
+                put("createdAt", FieldValue.serverTimestamp())
+            }
+            paymentRef.set(paymentPayload).await()
+
+            Result.success(invoiceNumber)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, docPath)
+            Result.failure(e)
+        }
+    }
+
+    fun observeChatThreads(userId: String): Flow<List<ChatThread>> = flow {
+        val uid = requireUserId()
+        check(uid == userId) { "Signed-in user mismatch." }
+        val path = "chatThreads"
+        emitAll(
+            db.collection("chatThreads")
+                .whereArrayContains("participantIds", uid)
+                .snapshots()
+                .map { snapshot ->
+                    snapshot.toObjects(
+                        ChatThread::class.java,
+                        DocumentSnapshot.ServerTimestampBehavior.ESTIMATE,
+                    ).sortedByDescending {
+                        it.updatedAt?.toDate()?.time ?: it.createdAt?.toDate()?.time ?: 0L
+                    }
+                }
+                .catch { error ->
+                    val firestoreError = generateSequence(error) { it.cause }
+                        .filterIsInstance<FirebaseFirestoreException>()
+                        .firstOrNull()
+                    if (firestoreError == null && error is CancellationException) throw error
+                    val exceptionToLog = firestoreError ?: (error as? Exception)
+                    if (exceptionToLog != null && auth.currentUser?.uid == uid) {
+                        handleFirestoreError(exceptionToLog, OperationType.LIST, path)
+                    }
+                    throw error
+                }
+        )
+    }
+
+    fun observeChatThread(threadId: String, userId: String): Flow<ChatThread?> = flow {
+        val uid = requireUserId()
+        check(uid == userId) { "Signed-in user mismatch." }
+        require(threadId.isNotBlank()) { "Thread ID is required." }
+        val path = "chatThreads/$threadId"
+        emitAll(
+            db.collection("chatThreads")
+                .whereArrayContains("participantIds", uid)
+                .snapshots()
+                .map { snapshot ->
+                    snapshot.toObjects(
+                        ChatThread::class.java,
+                        DocumentSnapshot.ServerTimestampBehavior.ESTIMATE,
+                    ).firstOrNull { it.id == threadId }
+                }
+                .catch { error ->
+                    val firestoreError = generateSequence(error) { it.cause }
+                        .filterIsInstance<FirebaseFirestoreException>()
+                        .firstOrNull()
+                    if (firestoreError == null && error is CancellationException) throw error
+                    val exceptionToLog = firestoreError ?: (error as? Exception)
+                    if (exceptionToLog != null && auth.currentUser?.uid == uid) {
+                        handleFirestoreError(exceptionToLog, OperationType.LIST, path)
+                    }
+                    throw error
+                }
+        )
+    }
+
+    fun observeChatMessages(threadId: String, userId: String): Flow<List<ChatMessage>> = flow {
+        val uid = requireUserId()
+        check(uid == userId) { "Signed-in user mismatch." }
+        require(threadId.isNotBlank()) { "Thread ID is required." }
+        val path = "chatThreads/$threadId/messages"
+        emitAll(
+            db.collection("chatThreads")
+                .document(threadId)
+                .collection("messages")
+                .whereArrayContains("participantIds", uid)
+                .snapshots()
+                .map { snapshot ->
+                    snapshot.toObjects(
+                        ChatMessage::class.java,
+                        DocumentSnapshot.ServerTimestampBehavior.ESTIMATE,
+                    ).sortedWith(
+                        compareBy<ChatMessage>(
+                            { it.sentAt?.toDate()?.time ?: it.clientSentMillis },
+                            { it.clientSentMillis },
+                            { it.id },
+                        )
+                    )
+                }
+                .catch { error ->
+                    val firestoreError = generateSequence(error) { it.cause }
+                        .filterIsInstance<FirebaseFirestoreException>()
+                        .firstOrNull()
+                    if (firestoreError == null && error is CancellationException) throw error
+                    val exceptionToLog = firestoreError ?: (error as? Exception)
+                    if (exceptionToLog != null && auth.currentUser?.uid == uid) {
+                        handleFirestoreError(exceptionToLog, OperationType.LIST, path)
+                    }
+                    throw error
+                }
+        )
+    }
+
+    suspend fun sendChatMessage(
+        providerId: String,
+        providerUserId: String,
+        providerBusinessName: String,
+        providerCategoryName: String,
+        customerId: String,
+        customerName: String,
+        senderName: String,
+        body: String,
+        messageType: String = "text",
+    ): Result<String> {
+        val cleanProviderId = providerId.trim()
+        val cleanProviderUid = providerUserId.trim()
+        val cleanCustomerId = customerId.trim()
+        val threadId = ChatValidator.deterministicThreadId(cleanProviderId, cleanCustomerId)
+        val docPath = "chatThreads/$threadId/messages"
+        return try {
+            val uid = requireUserId()
+            require(cleanProviderId.isNotBlank() && cleanProviderUid.isNotBlank() && cleanCustomerId.isNotBlank()) {
+                "Conversation participant identifiers are missing."
+            }
+            require(cleanCustomerId != cleanProviderUid) {
+                "You cannot start a pre-booking chat with your own provider profile."
+            }
+            require(uid == cleanCustomerId || uid == cleanProviderUid) {
+                "You are not a participant in this conversation."
+            }
+            val cleanBody = body.trim()
+            require(ChatValidator.isValidMessageBody(cleanBody)) {
+                "Message must be between 1 and 1,000 characters."
+            }
+            val cleanCustomerName = customerName.trim().ifBlank { "Trolley Customer" }.take(120)
+            val cleanSenderName = senderName.trim().ifBlank {
+                if (uid == cleanProviderUid) providerBusinessName else cleanCustomerName
+            }.take(120)
+            val cleanBizName = providerBusinessName.trim().ifBlank { "Service Provider" }.take(120)
+            val cleanCategoryName = providerCategoryName.trim().ifBlank { "Services" }.take(120)
+            val safeMessageType = ChatValidator.resolveMessageType(messageType)
+            val participants = ChatValidator.buildParticipantIds(cleanCustomerId, cleanProviderUid)
+
+            val threadRef = db.collection("chatThreads").document(threadId)
+            val existingThread = threadRef.get().await()
+            val messageRef = threadRef.collection("messages").document()
+            val nowMs = System.currentTimeMillis().coerceAtLeast(1L)
+
+            val batch = db.batch()
+            if (!existingThread.exists()) {
+                require(uid == cleanCustomerId) {
+                    "Only customers can initiate a new pre-booking inquiry thread."
+                }
+                val threadPayload = buildMap<String, Any> {
+                    put("customerId", cleanCustomerId)
+                    put("providerId", cleanProviderId)
+                    put("providerUserId", cleanProviderUid)
+                    put("participantIds", participants)
+                    put("customerName", cleanCustomerName)
+                    put("providerBusinessName", cleanBizName)
+                    put("providerCategoryName", cleanCategoryName)
+                    put("lastMessageText", cleanBody)
+                    put("lastSenderId", uid)
+                    put("messageCount", 1)
+                    put("lastCustomerReadAt", FieldValue.serverTimestamp())
+                    put("createdAt", FieldValue.serverTimestamp())
+                    put("updatedAt", FieldValue.serverTimestamp())
+                }
+                batch.set(threadRef, threadPayload)
+            } else {
+                val updates = mutableMapOf<String, Any>(
+                    "lastMessageText" to cleanBody,
+                    "lastSenderId" to uid,
+                    "messageCount" to FieldValue.increment(1),
+                    "updatedAt" to FieldValue.serverTimestamp(),
+                )
+                if (uid == cleanCustomerId) {
+                    updates["customerName"] = cleanCustomerName
+                    updates["lastCustomerReadAt"] = FieldValue.serverTimestamp()
+                } else {
+                    updates["lastProviderReadAt"] = FieldValue.serverTimestamp()
+                }
+                batch.update(threadRef, updates)
+            }
+
+            val messagePayload = buildMap<String, Any> {
+                put("threadId", threadId)
+                put("providerId", cleanProviderId)
+                put("providerUserId", cleanProviderUid)
+                put("customerId", cleanCustomerId)
+                put("participantIds", participants)
+                put("senderId", uid)
+                put("senderName", cleanSenderName)
+                put("body", cleanBody)
+                put("messageType", safeMessageType)
+                put("clientSentMillis", nowMs)
+                put("sentAt", FieldValue.serverTimestamp())
+            }
+            batch.set(messageRef, messagePayload)
+            batch.commit().await()
+
+            Result.success(messageRef.id)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, docPath)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun markChatThreadRead(threadId: String): Result<Unit> {
+        val cleanThreadId = threadId.trim()
+        val docPath = "chatThreads/$cleanThreadId"
+        return try {
+            val uid = requireUserId()
+            if (cleanThreadId.isBlank()) return Result.success(Unit)
+            val threadRef = db.collection("chatThreads").document(cleanThreadId)
+            val snap = threadRef.get().await()
+            if (!snap.exists()) return Result.success(Unit)
+            val thread = snap.toObject(
+                ChatThread::class.java,
+                DocumentSnapshot.ServerTimestampBehavior.ESTIMATE,
+            ) ?: return Result.success(Unit)
+            if (uid !in thread.participantIds || !thread.hasUnreadFor(uid)) {
+                return Result.success(Unit)
+            }
+            val readField = if (uid == thread.customerId) "lastCustomerReadAt" else "lastProviderReadAt"
+            val updates = mapOf<String, Any>(
+                readField to FieldValue.serverTimestamp(),
+                "updatedAt" to FieldValue.serverTimestamp(),
+            )
+            threadRef.update(updates).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, docPath)
             Result.failure(e)
         }
     }

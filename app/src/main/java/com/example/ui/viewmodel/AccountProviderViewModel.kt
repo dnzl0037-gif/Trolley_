@@ -8,6 +8,7 @@ import com.example.data.firebase.TrolleyRepository
 import com.example.data.model.ProviderProfile
 import com.example.data.model.ProviderRatingSummary
 import com.example.data.model.ProviderReview
+import com.example.data.model.ProviderSubscription
 import com.example.data.model.ReviewCalculator
 import com.example.data.model.UiState
 import com.example.data.model.UserAccount
@@ -95,6 +96,20 @@ class AccountProviderViewModel(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
             initialValue = ProviderRatingSummary(providerId = currentUserId),
+        )
+
+    val ownSubscriptionState: StateFlow<ProviderSubscription?> = repository.observeProviderSubscription(currentUserId)
+        .catch { error ->
+            val firestoreError = generateSequence(error) { it.cause }
+                .filterIsInstance<FirebaseFirestoreException>()
+                .firstOrNull()
+            if (firestoreError == null && error is CancellationException) throw error
+            emit(null)
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+            initialValue = null,
         )
 
     private val _isBusy = MutableStateFlow(false)
@@ -188,6 +203,7 @@ class AccountProviderViewModel(
         businessAddress: String = "",
         latitude: Double? = null,
         longitude: Double? = null,
+        onCreated: () -> Unit = {},
     ) {
         if (_isBusy.value) return
         viewModelScope.launch {
@@ -205,12 +221,13 @@ class AccountProviderViewModel(
                 longitude = longitude,
             )
             _isBusy.value = false
-            _notice.value = result.fold(
+            result.fold(
                 onSuccess = { ref ->
-                    MutationNotice("Your provider profile has been saved as a draft (reference ${ref.take(8)}). It is not public until reviewed and approved.")
+                    _notice.value = MutationNotice("Provider profile saved (ref ${ref.take(8)}). Choose your Free or Pro subscription plan.")
+                    onCreated()
                 },
                 onFailure = { error ->
-                    MutationNotice(error.localizedMessage ?: "Unable to save your provider draft. Please try again.", isError = true)
+                    _notice.value = MutationNotice(error.localizedMessage ?: "Unable to save your provider draft. Please try again.", isError = true)
                 },
             )
         }

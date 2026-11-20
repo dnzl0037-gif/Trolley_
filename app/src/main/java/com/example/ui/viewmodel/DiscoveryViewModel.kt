@@ -106,4 +106,8 @@ class DiscoveryViewModel(
     fun setConsentChoice(choice: String) {
         viewModelScope.launch { preferences.setConsentChoice(choice) }
     }
+
+    fun clearConsentChoice() {
+        viewModelScope.launch { preferences.clearConsentChoice() }
+    }
 }

@@ -1,0 +1,2 @@
+-keepattributes Signature,*Annotation*
+-keepclassmembers class com.example.data.model.** { *; }

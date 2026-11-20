@@ -1,4 +1,133 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Trolley</string>
+    <string name="brand_wordmark">trolley</string>
+    <string name="nav_discover">Discover</string>
+    <string name="nav_bookings">Bookings</string>
+    <string name="nav_how_trust">How &amp; Trust</string>
+    <string name="nav_my_business">My Business</string>
+    <string name="nav_profile">Profile</string>
+
+    <string name="hero_eyebrow">YOUR LOCAL SERVICES, SORTED</string>
+    <string name="hero_title_line1">Find the right</string>
+    <string name="hero_title_line2">people for the job.</string>
+    <string name="hero_lead">From the quick fix to the big project. Discover local professionals, compare your options and get the help you need.</string>
+    <string name="search_placeholder">Search local pros by category or keyword…</string>
+    <string name="clear_search">Clear filters</string>
+    <string name="find_a_pro">Find a pro</string>
+    <string name="hero_meta_real">Real providers. Real profiles.</string>
+    <string name="hero_meta_no_pressure">No pressure. Just options.</string>
+    <string name="hero_art_caption">The right help is closer than you think</string>
+
+    <string name="trust_strip_1">Built around trust</string>
+    <string name="trust_strip_2">Your data stays yours</string>
+    <string name="trust_strip_3">Zimbabwe first. Everywhere next.</string>
+    <string name="trust_strip_4">Connect directly with providers</string>
+
+    <string name="explore_eyebrow">DISCOVER WHAT YOU NEED</string>
+    <string name="explore_title_prefix">What can we help you </string>
+    <string name="explore_title_accent">find?</string>
+    <string name="browse_all_services">Browse all services</string>
+    <string name="show_less">Show less</string>
+    <string name="directory_kicker">SERVICE DIRECTORY</string>
+    <string name="directory_title">Explore the directory</string>
+    <string name="all_services">All services</string>
+    <string name="directory_empty_title">Search over 1,000 service specialities</string>
+    <string name="directory_empty_body">Type a service above to see matching categories. Provider results will appear here once real providers publish approved listings.</string>
+    <string name="directory_no_matches">No matching service types yet. Try a broader search or another phrase.</string>
+    <string name="see_categories">See categories</string>
+    <string name="hide_categories">Hide categories</string>
+
+    <string name="how_eyebrow">SIMPLE BY DESIGN</string>
+    <string name="how_title_prefix">From “I need help” to </string>
+    <string name="how_title_accent">job done.</string>
+    <string name="how_aside">A straightforward way to find the right professional and get the conversation started.</string>
+    <string name="step_1_title">Tell us what you need</string>
+    <string name="step_1_body">Search by service, speciality or location. Narrow things down to what matters to you.</string>
+    <string name="step_2_title">Explore real providers</string>
+    <string name="step_2_body">Review published profiles, service areas, portfolios and genuine customer feedback.</string>
+    <string name="step_3_title">Connect with confidence</string>
+    <string name="step_3_body">Send an enquiry, discuss the work and compare quotations before making a decision.</string>
+
+    <string name="trust_eyebrow">TRUST IS THE STARTING POINT</string>
+    <string name="trust_title_prefix">Good work starts with </string>
+    <string name="trust_title_accent">good people.</string>
+    <string name="trust_body">Trolley is designed to make finding help feel clearer and safer. Provider profiles are reviewed before they appear publicly, and customer reviews are tied to eligible service interactions.</string>
+    <string name="trust_point_1_title">Reviewed listings</string>
+    <string name="trust_point_1_body">Profiles go through a publishing review.</string>
+    <string name="trust_point_2_title">Private by default</string>
+    <string name="trust_point_2_body">Your personal information is protected.</string>
+    <string name="trust_point_3_title">Genuine feedback</string>
+    <string name="trust_point_3_body">No invented ratings or testimonials.</string>
+    <string name="our_privacy_approach">Our privacy approach</string>
+    <string name="terms_of_service_btn">Terms of service</string>
+
+    <string name="provider_cta_eyebrow">FOR SERVICE PROFESSIONALS</string>
+    <string name="provider_cta_title_prefix">Great at what you do?\n</string>
+    <string name="provider_cta_title_accent">Get found on Trolley.</string>
+    <string name="provider_cta_body">Create a business profile, showcase your work and connect with people looking for your services.</string>
+    <string name="list_your_business">List your business</string>
+
+    <string name="bottom_note_title">Just getting started?</string>
+    <string name="bottom_note_body">Trolley is being built with real providers and transparent information. No made-up listings, reviews or statistics.</string>
+    <string name="get_in_touch">Get in touch</string>
+
+    <string name="consent_title">Your privacy matters</string>
+    <string name="consent_body">We use essential storage to make Trolley work. Optional analytics stay off unless you choose to allow them.</string>
+    <string name="reject_optional">Reject optional</string>
+    <string name="accept_all">Accept all</string>
+    <string name="learn_more">Learn more</string>
+
+    <string name="auth_eyebrow">WELCOME TO TROLLEY</string>
+    <string name="auth_title">Sign in or sign up with Google.</string>
+    <string name="auth_intro">Connect with your Google account to create or manage your private provider profile draft. Login prompts time out after 45 seconds and sensitive actions use a 10-minute verification window.</string>
+    <string name="sign_in_google">Continue with Google</string>
+    <string name="sign_out">Sign out</string>
+    <string name="support_email">gmrboy2009@gmail.com</string>
+
+    <string name="provider_eyebrow">GROW WITH TROLLEY</string>
+    <string name="provider_create_title">Create your provider profile.</string>
+    <string name="provider_edit_title">Your saved provider profile.</string>
+    <string name="provider_create_intro">Start with your business details. Trolley saves this as a private draft; an administrator must review and approve it before customers can find it.</string>
+    <string name="save_provider_draft">Save provider draft</string>
+    <string name="save_changes">Save changes</string>
+    <string name="submit_for_review">Submit for review</string>
+    <string name="reload_saved_details">Reload saved details</string>
+    <string name="toggle_theme_desc">Toggle light or dark theme</string>
+
+    <string name="profile_eyebrow">YOUR TROLLEY ACCOUNT</string>
+    <string name="profile_title">Account &amp; Profile</string>
+    <string name="profile_intro">Review your Firebase Auth session details and update your display name or profile picture.</string>
+    <string name="profile_save_changes">Save profile changes</string>
+    <string name="profile_choose_photo">Choose photo</string>
+    <string name="profile_remove_photo">Clear custom photo</string>
+
+    <string name="view_mode_directory">Directory</string>
+    <string name="view_mode_map">Map View</string>
+    <string name="map_near_me">Near me</string>
+    <string name="map_sign_in_prompt">Sign in with Google to view live approved providers and your saved business pin on the map.</string>
+    <string name="map_sign_in_action">Sign in with Google</string>
+    <string name="map_empty_title">No approved providers in this area yet</string>
+    <string name="map_empty_body">Real service professionals appear on the map once they publish a business address and pass review. Add your own business address to preview your pin.</string>
+    <string name="map_open_directions">Directions</string>
+    <string name="map_contact_pro">Contact</string>
+    <string name="map_edit_listing">Edit listing</string>
+    <string name="map_request_booking">Request booking</string>
+
+    <string name="bookings_eyebrow">SCHEDULING &amp; REQUESTS</string>
+    <string name="bookings_title">Service Bookings</string>
+    <string name="bookings_intro">Request appointments linked directly to provider profiles, or manage incoming client requests for your business.</string>
+    <string name="bookings_tab_mine">My Requests</string>
+    <string name="bookings_tab_incoming">Client Requests</string>
+    <string name="booking_send_request">Send booking request</string>
+    <string name="booking_save_schedule">Save new time</string>
+
+    <string name="view_provider_profile">View profile &amp; reviews</string>
+    <string name="reviews_eyebrow">VERIFIED CUSTOMER FEEDBACK</string>
+    <string name="reviews_section_title">Ratings &amp; Reviews</string>
+    <string name="review_submit_btn">Submit review</string>
+    <string name="review_update_btn">Update your review</string>
+    <string name="review_delete_btn">Delete review</string>
+    <string name="review_empty_title">No customer reviews yet</string>
+    <string name="review_empty_body">Be the first customer to rate this service professional after working with them.</string>
 </resources>

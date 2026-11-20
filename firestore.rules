@@ -1,0 +1,293 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Shared primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidTimestamp(ts) {
+      return ts is timestamp && ts <= request.time;
+    }
+
+    // Entity validation helpers
+    function isValidUserAccount(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.fullName is string && data.fullName.size() >= 1 && data.fullName.size() <= 120 &&
+             data.ageVerified is bool &&
+             (!('email' in data) || (data.email is string && data.email.size() <= 200)) &&
+             (!('dateOfBirth' in data) || (data.dateOfBirth is string && data.dateOfBirth.size() == 10 && data.dateOfBirth.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$'))) &&
+             (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() <= 1000 && data.photoUrl.matches('^https://.*$'))) &&
+             (!('photoBase64' in data) || (data.photoBase64 is string && data.photoBase64.size() <= 80000)) &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidProviderProfile(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.businessName is string && data.businessName.size() >= 2 && data.businessName.size() <= 120 &&
+             (!('description' in data) || (data.description is string && data.description.size() <= 1200)) &&
+             data.categorySlug is string && data.categorySlug.size() >= 1 && data.categorySlug.size() <= 120 && data.categorySlug.matches('^[a-z0-9\\-]+$') &&
+             data.categoryName is string && data.categoryName.size() >= 1 && data.categoryName.size() <= 120 &&
+             data.countryCode is string && data.countryCode.size() == 2 && data.countryCode.matches('^[A-Z]{2}$') &&
+             data.city is string && data.city.size() >= 2 && data.city.size() <= 100 &&
+             (!('businessAddress' in data) || (data.businessAddress is string && data.businessAddress.size() >= 2 && data.businessAddress.size() <= 200)) &&
+             (!('latitude' in data) || (data.latitude is number && data.latitude >= -90 && data.latitude <= 90)) &&
+             (!('longitude' in data) || (data.longitude is number && data.longitude >= -180 && data.longitude <= 180)) &&
+             data.listingStatus is string && data.listingStatus in ['draft', 'pending_review'] &&
+             data.verificationStatus is string && data.verificationStatus == 'not_submitted' &&
+             (!('submittedAt' in data) || isValidTimestamp(data.submittedAt)) &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    // Owner-only user accounts (PII isolated per UID)
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+      allow list: if false;
+
+      allow create: if isSignedIn() &&
+                       isValidId(userId) &&
+                       request.auth.uid == userId &&
+                       incoming().userId == request.auth.uid &&
+                       incoming().keys().hasAll(['userId', 'fullName', 'ageVerified', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'fullName', 'email', 'dateOfBirth', 'ageVerified', 'photoUrl', 'photoBase64', 'createdAt', 'updatedAt']) &&
+                       isValidUserAccount(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidUserAccount(incoming()) &&
+                       isValidId(userId) &&
+                       request.auth.uid == userId &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['fullName', 'email', 'dateOfBirth', 'ageVerified', 'photoUrl', 'photoBase64', 'updatedAt']);
+
+      allow delete: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+    }
+
+    // Provider profiles: owner-only drafts/pending_review; authenticated read for admin-published listings
+    match /providerProfiles/{providerId} {
+      allow get: if isSignedIn() && isValidId(providerId) && (
+        request.auth.uid == providerId ||
+        existing().listingStatus == 'published'
+      );
+      allow list: if isSignedIn() && (
+        existing().userId == request.auth.uid ||
+        existing().listingStatus == 'published'
+      );
+
+      allow create: if isSignedIn() &&
+                       isValidId(providerId) &&
+                       request.auth.uid == providerId &&
+                       incoming().userId == request.auth.uid &&
+                       incoming().keys().hasAll([
+                         'userId', 'businessName', 'categorySlug', 'categoryName',
+                         'countryCode', 'city', 'listingStatus', 'verificationStatus',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'userId', 'businessName', 'description', 'categorySlug', 'categoryName',
+                         'countryCode', 'city', 'businessAddress', 'latitude', 'longitude',
+                         'listingStatus', 'verificationStatus', 'submittedAt', 'createdAt', 'updatedAt'
+                       ]) &&
+                       (
+                         (incoming().listingStatus == 'draft' && !('submittedAt' in incoming())) ||
+                         (incoming().listingStatus == 'pending_review' && isValidTimestamp(incoming().submittedAt))
+                       ) &&
+                       isValidProviderProfile(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidProviderProfile(incoming()) &&
+                       isValidId(providerId) &&
+                       request.auth.uid == providerId &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().verificationStatus == existing().verificationStatus &&
+                       (
+                         // Action 1: Save changes without changing listingStatus
+                         (
+                           incoming().listingStatus == existing().listingStatus &&
+                           (!('submittedAt' in existing()) ? !('submittedAt' in incoming()) : incoming().submittedAt == existing().submittedAt) &&
+                           incoming().diff(existing()).affectedKeys().hasOnly([
+                             'businessName', 'description', 'categorySlug', 'categoryName',
+                             'countryCode', 'city', 'businessAddress', 'latitude', 'longitude', 'updatedAt'
+                           ])
+                         ) ||
+                         // Action 2: Submit a draft for review (draft -> pending_review)
+                         (
+                           existing().listingStatus == 'draft' &&
+                           incoming().listingStatus == 'pending_review' &&
+                           isValidTimestamp(incoming().submittedAt) &&
+                           incoming().diff(existing()).affectedKeys().hasOnly([
+                             'businessName', 'description', 'categorySlug', 'categoryName',
+                             'countryCode', 'city', 'businessAddress', 'latitude', 'longitude',
+                             'listingStatus', 'submittedAt', 'updatedAt'
+                           ])
+                         )
+                       );
+
+      allow delete: if isSignedIn() &&
+                       isValidId(providerId) &&
+                       request.auth.uid == providerId &&
+                       existing().listingStatus == 'draft';
+    }
+
+    function isValidBookingRequest(data) {
+      return data.customerId is string && isValidId(data.customerId) &&
+             data.customerName is string && data.customerName.size() >= 1 && data.customerName.size() <= 120 &&
+             data.providerId is string && isValidId(data.providerId) &&
+             data.providerUserId is string && isValidId(data.providerUserId) &&
+             data.providerBusinessName is string && data.providerBusinessName.size() >= 2 && data.providerBusinessName.size() <= 120 &&
+             data.categorySlug is string && data.categorySlug.size() >= 1 && data.categorySlug.size() <= 120 && data.categorySlug.matches('^[a-z0-9\\-]+$') &&
+             data.categoryName is string && data.categoryName.size() >= 1 && data.categoryName.size() <= 120 &&
+             data.providerLocation is string && data.providerLocation.size() >= 2 && data.providerLocation.size() <= 250 &&
+             data.scheduledDate is string && data.scheduledDate.size() == 10 && data.scheduledDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
+             data.scheduledTime is string && data.scheduledTime.size() == 5 && data.scheduledTime.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$') &&
+             (!('notes' in data) || (data.notes is string && data.notes.size() <= 600)) &&
+             data.status is string && data.status in ['pending', 'accepted', 'declined', 'cancelled', 'completed'] &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isBookableProvider(providerId, claimedProviderUserId) {
+      let providerPath = /databases/$(database)/documents/providerProfiles/$(providerId);
+      return exists(providerPath) &&
+             get(providerPath).data.userId == claimedProviderUserId &&
+             (
+               get(providerPath).data.listingStatus == 'published' ||
+               get(providerPath).data.userId == request.auth.uid
+             );
+    }
+
+    // Service booking requests linked between customer and provider profile
+    match /bookings/{bookingId} {
+      allow get: if isSignedIn() && isValidId(bookingId) && (
+        existing().customerId == request.auth.uid ||
+        existing().providerUserId == request.auth.uid
+      );
+      allow list: if isSignedIn() && (
+        existing().customerId == request.auth.uid ||
+        existing().providerUserId == request.auth.uid
+      );
+
+      allow create: if isSignedIn() &&
+                       isValidId(bookingId) &&
+                       incoming().customerId == request.auth.uid &&
+                       incoming().status == 'pending' &&
+                       incoming().keys().hasAll([
+                         'customerId', 'customerName', 'providerId', 'providerUserId',
+                         'providerBusinessName', 'categorySlug', 'categoryName', 'providerLocation',
+                         'scheduledDate', 'scheduledTime', 'status', 'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'customerId', 'customerName', 'providerId', 'providerUserId',
+                         'providerBusinessName', 'categorySlug', 'categoryName', 'providerLocation',
+                         'scheduledDate', 'scheduledTime', 'notes', 'status', 'createdAt', 'updatedAt'
+                       ]) &&
+                       isValidBookingRequest(incoming()) &&
+                       isBookableProvider(incoming().providerId, incoming().providerUserId);
+
+      allow update: if isSignedIn() &&
+                       isValidId(bookingId) &&
+                       isValidBookingRequest(incoming()) &&
+                       incoming().customerId == existing().customerId &&
+                       incoming().providerId == existing().providerId &&
+                       incoming().providerUserId == existing().providerUserId &&
+                       incoming().createdAt == existing().createdAt &&
+                       existing().status in ['pending', 'accepted'] &&
+                       (
+                         // Action 1: Customer cancels a pending or accepted request
+                         (
+                           request.auth.uid == existing().customerId &&
+                           incoming().status == 'cancelled' &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+                         ) ||
+                         // Action 2: Customer reschedules or updates notes while still pending
+                         (
+                           request.auth.uid == existing().customerId &&
+                           existing().status == 'pending' &&
+                           incoming().status == 'pending' &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['scheduledDate', 'scheduledTime', 'notes', 'updatedAt'])
+                         ) ||
+                         // Action 3: Provider accepts/declines a pending request, or completes an accepted booking
+                         (
+                           request.auth.uid == existing().providerUserId &&
+                           (
+                             (existing().status == 'pending' && incoming().status in ['accepted', 'declined']) ||
+                             (existing().status == 'accepted' && incoming().status == 'completed')
+                           ) &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+                         )
+                       );
+
+      allow delete: if false;
+    }
+
+    function isValidProviderReview(data) {
+      return data.providerId is string && isValidId(data.providerId) &&
+             data.providerUserId is string && isValidId(data.providerUserId) &&
+             data.customerId is string && isValidId(data.customerId) &&
+             data.reviewerName is string && data.reviewerName.size() >= 1 && data.reviewerName.size() <= 120 &&
+             data.rating is int && data.rating >= 1 && data.rating <= 5 &&
+             data.comment is string && data.comment.size() >= 2 && data.comment.size() <= 1000 &&
+             (!('bookingId' in data) || (data.bookingId is string && isValidId(data.bookingId))) &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    // Customer reviews & ratings linked to /providerProfiles/{providerId}
+    match /reviews/{reviewId} {
+      allow get: if isSignedIn() && isValidId(reviewId);
+      allow list: if isSignedIn();
+
+      allow create: if isSignedIn() &&
+                       isValidId(reviewId) &&
+                       reviewId == incoming().providerId + '__' + request.auth.uid &&
+                       incoming().customerId == request.auth.uid &&
+                       incoming().keys().hasAll([
+                         'providerId', 'providerUserId', 'customerId', 'reviewerName',
+                         'rating', 'comment', 'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'providerId', 'providerUserId', 'customerId', 'reviewerName',
+                         'rating', 'comment', 'bookingId', 'createdAt', 'updatedAt'
+                       ]) &&
+                       isValidProviderReview(incoming()) &&
+                       isBookableProvider(incoming().providerId, incoming().providerUserId);
+
+      allow update: if isSignedIn() &&
+                       isValidId(reviewId) &&
+                       isValidProviderReview(incoming()) &&
+                       request.auth.uid == existing().customerId &&
+                       incoming().customerId == existing().customerId &&
+                       incoming().providerId == existing().providerId &&
+                       incoming().providerUserId == existing().providerUserId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'reviewerName', 'rating', 'comment', 'bookingId', 'updatedAt'
+                       ]);
+
+      allow delete: if isSignedIn() &&
+                       isValidId(reviewId) &&
+                       request.auth.uid == existing().customerId;
+    }
+  }
+}

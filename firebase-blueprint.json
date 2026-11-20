@@ -1,0 +1,288 @@
+{
+  "entities": {
+    "UserAccount": {
+      "title": "UserAccount",
+      "description": "Authenticated user account profile with 13+ age verification state.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the account owner."
+        },
+        "fullName": {
+          "type": "string",
+          "description": "User's display or full name (1 to 120 characters)."
+        },
+        "email": {
+          "type": "string",
+          "description": "Optional account email address."
+        },
+        "dateOfBirth": {
+          "type": "string",
+          "description": "Optional ISO date of birth (YYYY-MM-DD) used for 13+ age verification."
+        },
+        "ageVerified": {
+          "type": "boolean",
+          "description": "Whether the user has confirmed they are at least 13 years old."
+        },
+        "photoUrl": {
+          "type": "string",
+          "description": "Optional HTTPS profile picture URL synced with Firebase Auth."
+        },
+        "photoBase64": {
+          "type": "string",
+          "description": "Optional Base64-encoded cropped avatar thumbnail uploaded from the device Photo Picker."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the account profile was created (FieldValue.serverTimestamp())."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the account profile was last updated (FieldValue.serverTimestamp())."
+        }
+      },
+      "required": ["userId", "fullName", "ageVerified", "createdAt", "updatedAt"]
+    },
+    "ProviderProfile": {
+      "title": "ProviderProfile",
+      "description": "Private provider business draft and pending-review submission owned by a single user.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the provider profile owner."
+        },
+        "businessName": {
+          "type": "string",
+          "description": "Provider business name (2 to 120 characters)."
+        },
+        "description": {
+          "type": "string",
+          "description": "Optional short business description (up to 1200 characters)."
+        },
+        "categorySlug": {
+          "type": "string",
+          "description": "Slug of the primary service subcategory."
+        },
+        "categoryName": {
+          "type": "string",
+          "description": "Human-readable name of the primary service subcategory."
+        },
+        "countryCode": {
+          "type": "string",
+          "description": "Two-letter uppercase ISO 3166-1 country code."
+        },
+        "city": {
+          "type": "string",
+          "description": "Service city (2 to 100 characters)."
+        },
+        "businessAddress": {
+          "type": "string",
+          "description": "Optional business street or neighbourhood address used for map placement (2 to 200 characters)."
+        },
+        "latitude": {
+          "type": "number",
+          "description": "Optional geocoded latitude in [-90, 90] derived from the business address."
+        },
+        "longitude": {
+          "type": "number",
+          "description": "Optional geocoded longitude in [-180, 180] derived from the business address."
+        },
+        "listingStatus": {
+          "type": "string",
+          "enum": ["draft", "pending_review"],
+          "description": "Client-editable listing state; public approval ('published') is server/admin controlled."
+        },
+        "verificationStatus": {
+          "type": "string",
+          "enum": ["not_submitted"],
+          "description": "Client-initialized verification status; only administrators can approve verification."
+        },
+        "submittedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the draft was submitted for review (FieldValue.serverTimestamp())."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the draft was created (FieldValue.serverTimestamp())."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the draft was last updated (FieldValue.serverTimestamp())."
+        }
+      },
+      "required": [
+        "userId",
+        "businessName",
+        "categorySlug",
+        "categoryName",
+        "countryCode",
+        "city",
+        "listingStatus",
+        "verificationStatus",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "BookingRequest": {
+      "title": "BookingRequest",
+      "description": "Scheduled service booking request submitted by a customer and linked to a service provider's profile.",
+      "type": "object",
+      "properties": {
+        "customerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the customer requesting the service."
+        },
+        "customerName": {
+          "type": "string",
+          "description": "Display name of the requesting customer (1 to 120 characters)."
+        },
+        "providerId": {
+          "type": "string",
+          "description": "Document ID of the linked /providerProfiles/{providerId} document."
+        },
+        "providerUserId": {
+          "type": "string",
+          "description": "Owner Firebase Auth UID of the linked service provider."
+        },
+        "providerBusinessName": {
+          "type": "string",
+          "description": "Snapshot business name of the linked provider profile (2 to 120 characters)."
+        },
+        "categorySlug": {
+          "type": "string",
+          "description": "Slug of the booked service category."
+        },
+        "categoryName": {
+          "type": "string",
+          "description": "Human-readable name of the booked service category."
+        },
+        "providerLocation": {
+          "type": "string",
+          "description": "Business address or city/country summary of the provider (2 to 250 characters)."
+        },
+        "scheduledDate": {
+          "type": "string",
+          "description": "Requested service date in ISO format (YYYY-MM-DD)."
+        },
+        "scheduledTime": {
+          "type": "string",
+          "description": "Requested service time in 24-hour format (HH:mm)."
+        },
+        "notes": {
+          "type": "string",
+          "description": "Optional customer notes or job details (up to 600 characters)."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "accepted", "declined", "cancelled", "completed"],
+          "description": "Current booking request status."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the booking request was created (FieldValue.serverTimestamp())."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the booking request was last updated (FieldValue.serverTimestamp())."
+        }
+      },
+      "required": [
+        "customerId",
+        "customerName",
+        "providerId",
+        "providerUserId",
+        "providerBusinessName",
+        "categorySlug",
+        "categoryName",
+        "providerLocation",
+        "scheduledDate",
+        "scheduledTime",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ProviderReview": {
+      "title": "ProviderReview",
+      "description": "Customer rating (1-5 stars) and written feedback stored per user and provider.",
+      "type": "object",
+      "properties": {
+        "providerId": {
+          "type": "string",
+          "description": "Document ID of the linked /providerProfiles/{providerId} document."
+        },
+        "providerUserId": {
+          "type": "string",
+          "description": "Owner Firebase Auth UID of the reviewed service provider."
+        },
+        "customerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the reviewing user."
+        },
+        "reviewerName": {
+          "type": "string",
+          "description": "Display name of the reviewer (1 to 120 characters)."
+        },
+        "rating": {
+          "type": "integer",
+          "description": "Integer star score from 1 to 5."
+        },
+        "comment": {
+          "type": "string",
+          "description": "Written feedback for the service provider (2 to 1000 characters)."
+        },
+        "bookingId": {
+          "type": "string",
+          "description": "Optional related /bookings/{bookingId} identifier when reviewing after a booking."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the review was first submitted (FieldValue.serverTimestamp())."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the review was last updated (FieldValue.serverTimestamp())."
+        }
+      },
+      "required": [
+        "providerId",
+        "providerUserId",
+        "customerId",
+        "reviewerName",
+        "rating",
+        "comment",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserAccount" },
+      "description": "Owner-only user account and age-gate record."
+    },
+    "/providerProfiles/{providerId}": {
+      "schema": { "$ref": "#/entities/ProviderProfile" },
+      "description": "Provider business profiles keyed by owner UID (private drafts and admin-published listings)."
+    },
+    "/bookings/{bookingId}": {
+      "schema": { "$ref": "#/entities/BookingRequest" },
+      "description": "Service booking requests linked between customerId and providerProfiles/{providerId}."
+    },
+    "/reviews/{reviewId}": {
+      "schema": { "$ref": "#/entities/ProviderReview" },
+      "description": "Customer ratings and feedback keyed deterministically as {providerId}__{customerId}."
+    }
+  }
+}
